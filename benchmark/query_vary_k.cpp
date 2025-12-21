@@ -4,6 +4,8 @@
 #include <fstream>
 #include <chrono>
 #include <iomanip>
+#include <random>
+#include <algorithm>
 
 #include "tree.h"
 #include "hotree.h"
@@ -13,53 +15,74 @@
 using namespace std;
 using namespace std::chrono;
 
+struct DatasetConfig {
+    string name;
+    string dict_path;
+    string data_path;
+};
+
 const int NUM_QUERIES = 2;
-vector<int> k_values = {1, 2, 3};
-string filename = "../exp_result/query_vary_k.csv";
-int n = 1024; // number of data
-
+const int FIXED_N = 1024; // 固定数据规模
+const vector<int> K_VALUES = {1, 3, 5, 7};
+vector<DatasetConfig> datasets = {
+    {"yelp", "../../dataset/yelp/keywords_dict.txt", "../../dataset/yelp/dataset.txt"},
+    {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
+    {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
+    {"synthetic", "../../dataset/synthetic/keywords_dict.txt", "../../dataset/synthetic/dataset.txt"}
+};
 int main() {
-    vector<string> dictionary = LoadDictionary("../../dataset/keywords_dict.txt");
-    vector<DataRecord> all_queries = readDataFromDataset("../../dataset/query.txt");
+    string result_filename = "../exp_result/query_vary_K.csv";
     
-    ofstream csv(filename);
-    csv << "N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize\n";
 
-    cout << "--- 执行实验 B (固定 N=" << n << ", BlockSize=" << BlockSize << ") ---" << endl;
+    ofstream csv(result_filename);
+    csv << "Dataset,N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize\n";
 
-    vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic_dataset.txt", n);
-    Client* client = nullptr;
-    HOTree hotree(dictionary);
-    hotree.Build(data, client);
-    client = hotree.getClient();
+    std::random_device rd;
+    std::mt19937 gen(rd());
 
-    for (int k : k_values) {
-        double total_time = 0;
-        long long total_rounds = 0;
-        long long total_volume = 0;
+    for (const auto& ds : datasets) {
+        cout << "\n>>> 正在测试数据集 (K变动): " << ds.name << endl;
+        
+        vector<string> dictionary = LoadDictionary(ds.dict_path);
+        vector<DataRecord> data = readDataFromDataset(ds.data_path, FIXED_N);
+        if (data.empty()) continue;
 
-        for (int i = 0; i < NUM_QUERIES; ++i) {
-            const auto& q = all_queries[i % all_queries.size()];
+        // 构建索引 (固定 N，只需构建一次)
+        Client* client = nullptr;
+        HOTree hotree(dictionary);
+        hotree.Build(data, client);
+        client = hotree.getClient();
 
-            int start_rounds = client->communication_round_trip_;
-            int start_volume = client->communication_volume_;
+        for (int k : K_VALUES) {
+            // 随机打乱以选择查询点
+            vector<DataRecord> sampled_queries = data;
+            std::shuffle(sampled_queries.begin(), sampled_queries.end(), gen);
 
-            auto start_t = high_resolution_clock::now();
-            hotree.SearchTopK(q.x_coord, q.y_coord, q.processed_text, k, client);
-            auto end_t = high_resolution_clock::now();
+            double total_time = 0;
+            long long total_rounds = 0;
+            long long total_volume = 0;
 
-            total_time += duration_cast<microseconds>(end_t - start_t).count() / 1000.0;
-            total_rounds += (client->communication_round_trip_ - start_rounds);
-            total_volume += (client->communication_volume_ - start_volume);
+            for (int i = 0; i < NUM_QUERIES; ++i) {
+                const auto& q = sampled_queries[i];
+                int start_rounds = client->communication_round_trip_;
+                int start_volume = client->communication_volume_;
+
+                auto start_t = high_resolution_clock::now();
+                hotree.SearchTopK(q.x_coord, q.y_coord, q.processed_text, k, client);
+                auto end_t = high_resolution_clock::now();
+
+                total_time += duration_cast<microseconds>(end_t - start_t).count() / 1000.0;
+                total_rounds += (client->communication_round_trip_ - start_rounds);
+                total_volume += (client->communication_volume_ - start_volume);
+            }
+
+            double avg_t = total_time / NUM_QUERIES;
+            double avg_r = (double)total_rounds / NUM_QUERIES;
+            double avg_v = (double)total_volume / NUM_QUERIES;
+
+            csv << ds.name << "," << FIXED_N << "," << k << "," << avg_t << "," << avg_r << "," << avg_v << "," << BlockSize << "\n";
+            cout << "  [K=" << setw(2) << k << "] Time: " << fixed << setprecision(2) << avg_t << "ms" << endl;
         }
-
-        double avg_t = total_time / NUM_QUERIES;
-        double avg_r = static_cast<double>(total_rounds) / NUM_QUERIES;
-        double avg_v = static_cast<double>(total_volume) / NUM_QUERIES;
-
-        csv << n << "," << k << "," << avg_t << "," << avg_r << "," << avg_v << "," << BlockSize << "\n";
-        cout << "K=" << setw(3) << k << " | Time: " << fixed << setprecision(3) << avg_t 
-             << "ms | Rounds: " << avg_r << " | Vol: " << avg_v << " Bytes" << endl;
     }
     csv.close();
     return 0;

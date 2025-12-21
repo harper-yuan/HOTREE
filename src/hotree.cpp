@@ -175,9 +175,6 @@ vector<pair<double, DataRecord>> HOTree::SearchTopK(double qx, double qy, string
         int id = child->id;
 
         // access i-th level with real address and other levels with random addressess
-        if(id == -201) {
-            std::cout<<std::endl;
-        }
         auto child_branch = Access(id, level_i);
         child_branch->trueData = client_->cryptor_->aes_decrypt(child_branch->trueData, level_i); // decrypt the data using secret key in level i
         child_branch->level = -1; // this branch will be placed to client memory(marked level -1)

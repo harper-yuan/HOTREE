@@ -9,7 +9,7 @@ find_package(Boost 1.72.0 COMPONENTS unit_test_framework program_options system 
 find_package(OpenMP REQUIRED)
 find_library(CRYPTOPP_LIB NAMES cryptopp)
 add_subdirectory(src)
-# add_subdirectory(benchmark)
+add_subdirectory(benchmark)
 
 enable_testing()
 # add_subdirectory(test test_HoRGod)

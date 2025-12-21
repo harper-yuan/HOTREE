@@ -26,7 +26,7 @@ BOOST_AUTO_TEST_CASE(test_cuckoo_hash_correctness) {
     
     // 1. 读取数据
     // 这里的 limit 建议设大一点，比如 2000，以触发哈希冲突
-    vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic_dataset.txt", 2000);
+    vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic/synthetic_dataset.txt", 2000);
     
     if (data.empty()) {
         BOOST_FAIL("Dataset is empty!");
@@ -99,7 +99,7 @@ BOOST_AUTO_TEST_CASE(test_cuckoo_hash_correctness) {
 //     // 1. 准备大规模数据
 //     // 建议至少测试 10万~100万级的数据，才能看出缓存命中率的影响
 //     size_t data_size = pow(2, 20); // 约 26万数据
-//     vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic_dataset.txt", data_size);
+//     vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic/synthetic_dataset.txt", data_size);
 //     // 2. 构建哈希表
 //     CuckooTable cuckooTable(data_size * 1.5, 0); // 给够初始空间，减少构建时的 rehash 干扰
 //     Client* client = new Client(5);
@@ -178,7 +178,7 @@ BOOST_AUTO_TEST_CASE(test_oblivious_shuffle_correctness_and_perf) {
     // 1. 准备数据
     // 建议加载足够多的数据以测试性能，例如 4096 条
     int data_limit = 5000; 
-    std::vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic_dataset.txt", data_limit);
+    std::vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic/synthetic_dataset.txt", data_limit);
     
     if (data.empty()) {
         BOOST_FAIL("Dataset is empty! Check file path.");

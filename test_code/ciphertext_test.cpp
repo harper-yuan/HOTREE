@@ -41,13 +41,13 @@ BOOST_AUTO_TEST_CASE(test1) {
     std::uniform_int_distribution<int> dist(1, 100); 
     print_current_working_directory();
     // 确保路径正确
-    vector<string> dictionary = LoadDictionary("../../keywords_dict.txt");
+    vector<string> dictionary = LoadDictionary("../../synthetic/keywords_dict.txt");
     
     // 模拟 DataRecord 数据
-    vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic_dataset.txt", pow(2,10)); //1024
+    vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic/synthetic_dataset.txt", pow(2,10)); //1024
     
     // 查询数据
-    vector<DataRecord> queries = readDataFromDataset("../../dataset/query.txt"); //1024
+    vector<DataRecord> queries = readDataFromDataset("../../dataset/synthetic/query.txt"); //1024
     
     // 测试用例参数
     if (queries.empty()) {
@@ -107,9 +107,9 @@ BOOST_AUTO_TEST_CASE(test_query_timing) {
     std::mt19937 gen(rd()); 
     
     // 假设这些文件和函数已被正确定义和包含
-    vector<string> dictionary = LoadDictionary("../../dataset/keywords_dict.txt");
-    vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic_dataset.txt", pow(2,10)); // 1024条数据
-    vector<DataRecord> queries = readDataFromDataset("../../dataset/query.txt"); // 1024条查询
+    vector<string> dictionary = LoadDictionary("../../dataset/synthetic/keywords_dict.txt");
+    vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic/synthetic_dataset.txt", pow(2,10)); // 1024条数据
+    vector<DataRecord> queries = readDataFromDataset("../../dataset/synthetic/query.txt"); // 1024条查询
     
     // 检查数据完整性
     if (data.empty() || queries.empty()) {
