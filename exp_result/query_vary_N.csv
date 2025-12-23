@@ -1,9 +1,0 @@
-Dataset,N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize
-yelp,1024,1,1.461,23,11776,256
-yelp,2048,1,1.2345,23.5,12032,256
-tweets,1024,1,0.923,23,11776,256
-tweets,2048,1,0.947,22.5,11520,256
-foursquare,1024,1,0.501,23,11776,256
-foursquare,2048,1,0.5185,25,12800,256
-synthetic,1024,1,0.191,23,11776,256
-synthetic,2048,1,0.2365,25,12800,256

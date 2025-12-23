@@ -48,13 +48,9 @@ std::string Cryptor::aes_encrypt(const std::string& plain, int i)
     CryptoPP::SecByteBlock key = key_vec[i];
     CTR_Mode<AES>::Encryption encrypt_handler;
 
-    // 修改点 1: 去掉 CryptoPP::，直接用 unsigned char 或全局 byte
-    // 你的版本中 byte 是全局定义的，所以 CryptoPP::byte 是错的
+    AutoSeededRandomPool local_prng; // 在栈上创建，线程安全
     unsigned char iv[AES::BLOCKSIZE]; 
-    
-    {
-        prng.GenerateBlock(iv, AES::BLOCKSIZE);
-    }
+    local_prng.GenerateBlock(iv, AES::BLOCKSIZE);
 
     encrypt_handler.SetKeyWithIV(key, key.size(), iv, AES::BLOCKSIZE);
 
@@ -99,6 +95,9 @@ void Cryptor::aes_decrypt(const std::string& cipher_full, std::string& plain)
 
 std::string Cryptor::aes_decrypt(const std::string& cipher_full, int i)
 {   
+    if(i == -1) { // means this data blongs to client stash
+        return cipher_full;
+    }
     std::string plain;
     CryptoPP::SecByteBlock key = key_vec[i];
     if (cipher_full.length() < AES::BLOCKSIZE) {

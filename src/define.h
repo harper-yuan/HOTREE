@@ -19,7 +19,7 @@
 // --- 1. 配置参数 ---
 constexpr const int MAX_SIZE = 6;        // 节点最大容量 (分支数)
 constexpr const double ALPHA = 0.5;      // 权重因子：0.5 表示空间和文本同等重要
-constexpr const int Z = 100;            // Client stash size
+constexpr const int Z = 128;            // Client stash size
 constexpr const size_t cuckoo_stash_size = 4;
 constexpr const size_t BlockSize = 256; // padding every encrypted data to 4096 Bytes
 constexpr const int num_threads = 16; 

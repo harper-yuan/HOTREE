@@ -8,7 +8,7 @@
 class HOTree {
 private:
     Node* root = nullptr;
-    std::map<int, DataRecord> id_to_record_map; // ID 到原始数据的映射
+    std::vector<DataRecord> id_to_record_vec; 
     Client* client_;
     std::vector<std::unique_ptr<CuckooTable>> vec_hashtable_;
     

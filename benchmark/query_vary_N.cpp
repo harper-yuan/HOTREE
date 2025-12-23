@@ -23,14 +23,15 @@ struct DatasetConfig {
     string data_path;
 };
 
-const int NUM_QUERIES = 2; // 增加样本数以获得更准确的平均值
-const int FIXED_K = 1;
-const vector<int> N_VALUES = {1024, 2048}; 
+const int NUM_QUERIES = 50; // 增加样本数以获得更准确的平均值
+const int FIXED_K = 3;
+// const vector<int> N_VALUES = {1024, 2048}; 
+const vector<int> N_VALUES = {1024};
 // 定义四个数据集
 vector<DatasetConfig> datasets = {
-    {"yelp",       "../../dataset/yelp/keywords_dict.txt",       "../../dataset/yelp/dataset.txt"},
-    {"tweets",     "../../dataset/tweets/keywords_dict.txt",     "../../dataset/tweets/dataset.txt"},
-    {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
+    // {"yelp",       "../../dataset/yelp/keywords_dict.txt",       "../../dataset/yelp/dataset.txt"},
+    // {"tweets",     "../../dataset/tweets/keywords_dict.txt",     "../../dataset/tweets/dataset.txt"},
+    // {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
     {"synthetic",  "../../dataset/synthetic/keywords_dict.txt",  "../../dataset/synthetic/dataset.txt"}
 };
 int main() {
@@ -54,17 +55,17 @@ int main() {
 
         for (int n : N_VALUES) {
             // 2. 加载 N 条数据用于构建
-            vector<DataRecord> data = readDataFromDataset(ds.data_path, n);
-            if (data.empty()) continue;
+            vector<DataRecord> dataset = readDataFromDataset(ds.data_path, n);
+            if (dataset.empty()) continue;
 
             // 3. 构建索引
             Client* client = nullptr;
             HOTree hotree(dictionary);
-            hotree.Build(data, client);
+            hotree.Build(dataset, client);
             client = hotree.getClient();
 
             // 4. 从当前数据中随机选取查询
-            vector<DataRecord> sampled_queries = data;
+            vector<DataRecord> sampled_queries = readDataFromDataset(ds.data_path, NUM_QUERIES);
             std::shuffle(sampled_queries.begin(), sampled_queries.end(), gen);
 
             double total_time = 0;
@@ -80,7 +81,7 @@ int main() {
                 auto start_t = high_resolution_clock::now();
                 hotree.SearchTopK(q.x_coord, q.y_coord, q.processed_text, FIXED_K, client);
                 auto end_t = high_resolution_clock::now();
-
+                
                 total_time += duration_cast<microseconds>(end_t - start_t).count() / 1000.0;
             }
             total_rounds += (client->communication_round_trip_ - start_rounds);
