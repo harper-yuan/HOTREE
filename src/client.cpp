@@ -38,19 +38,16 @@ Client::~Client() {
 
 int Client::get_first_empty_level() {
     int result_level;
-    for(int level_i = min_level_; level_i < vec_hotree_level_i_is_empty_.size(); level_i++) {
-        if(!vec_hotree_level_i_is_empty_[level_i]) {
-            if(level_i == vec_hotree_level_i_is_empty_.size()-1) { //last level
-                result_level = level_i;
-            }
-            continue;
+    for(int level_i = min_level_; level_i <= max_level_; level_i++) {
+        if(vec_hotree_level_i_is_empty_[level_i]) {
+            return level_i;
         }
         else {
-            result_level = level_i; // mark the level id that all data will be removed to
-            break;
+            if(level_i == max_level_) { //last level
+                return max_level_;
+            }
         }
     }
-    return result_level;
 }
 
 double Client::CalcuTextRelevancy(std::vector<double> weight1, std::vector<double> weight2) {

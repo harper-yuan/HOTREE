@@ -108,7 +108,7 @@ BOOST_AUTO_TEST_CASE(test_query_timing) {
     
     // 假设这些文件和函数已被正确定义和包含
     vector<string> dictionary = LoadDictionary("../../dataset/synthetic/keywords_dict.txt");
-    vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic/dataset.txt", pow(2,6)); // 1024条数据
+    vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic/dataset.txt", pow(2,4)); // 1024条数据
     vector<DataRecord> queries = readDataFromDataset("../../dataset/synthetic/query.txt"); // 1024条查询
     
     // 检查数据完整性

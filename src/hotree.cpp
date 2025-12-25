@@ -104,8 +104,11 @@ void HOTree::Eviction(Client* client) {
     vector<Branch*> all_shuffled_branchs;
     vector<int> branchs_level_belong_to;
     int target_level = client_->get_first_empty_level();
+    cout<<"---------------------------------------start shuffle---------------------------------------\n";
 
+    /*-------------------------Move data of cuckoo hash tables to a vector-------------------------------*/
     for(int level_i = client_->min_level_; level_i < target_level; level_i++) {
+        
         if(!client->vec_hotree_level_i_is_empty_[level_i]) { // level_i is not empty
             // move the data in cuckoo table to a vector
             for(auto & entry : vec_hashtable_[level_i]->table) {
@@ -124,10 +127,8 @@ void HOTree::Eviction(Client* client) {
                 branchs_level_belong_to.push_back(level_i);
             }
             
-            // vec_hashtable_[level_i].reset();
+            // if data have removed, clear hash table
             client->vec_hotree_level_i_is_empty_[level_i] = true; // level_i will be empty
-            vec_hashtable_[level_i]->table.clear();
-            // vec_hashtable_[level_i]->stash.clear();
             client_->vector_every_level_stash_[level_i].clear();
             cout<<"level "<<level_i<<" is no empty"<<endl;
         }
@@ -142,8 +143,12 @@ void HOTree::Eviction(Client* client) {
                 branchs_level_belong_to.push_back(target_level);
             }
         }
+        // if data have removed, clear hash table
+        client_->vector_every_level_stash_[target_level].clear();
     }
     client->vec_hotree_level_i_is_empty_[target_level] = false; // level_i will be full
+
+    /*-------------------------Move data of client stash to a vector-------------------------------*/
     for (auto const& [id, elem] : client->stash_) {
         elem->trueData = client->cryptor_->aes_encrypt(elem->trueData, target_level);
         elem->level = target_level;
@@ -153,6 +158,9 @@ void HOTree::Eviction(Client* client) {
         all_shuffled_branchs.push_back(elem);
         branchs_level_belong_to.push_back(target_level);
     }
+    client->stash_.clear();
+
+    /*-------------------------update prediction level of all data-------------------------------*/
     for(auto & branch : all_shuffled_branchs) {
         for(auto & triple : branch->child_triple) {
             if(triple->level < target_level) {
@@ -163,31 +171,26 @@ void HOTree::Eviction(Client* client) {
             printf("id %d exist with counter %d in hotree.cpp\n", branch->id, branch->counter_for_lastest_data);
         }
     }
-    client->stash_.clear();
-    if(target_level == 9) {
-        cout<<"1"<<endl;
-    }
+    
+    /*-------------------------oblivious shuffle-------------------------------*/
     vec_hashtable_[target_level]->oblivious_shuffle_and_insert(all_shuffled_branchs, branchs_level_belong_to, client); // this fuction includes updating hash seed. 
 
-    //update the client stash for cuckoo table stash of target_level
+    /*-------------------------update the client stash for cuckoo table stash of target_level-------------------------------*/
     for(int i = 0; i < vec_hashtable_[target_level]->stash.size(); i++) {
         // move the stash to client, stash is so small that client is easy to save
         Branch* temp_branch = vec_hashtable_[target_level]->stash[i];
         temp_branch->trueData = client->cryptor_->aes_decrypt(temp_branch->trueData, target_level);
         client_->vector_every_level_stash_[target_level].push_back(temp_branch);
     }
-    for(auto & triple : root) {
-        // client_->min_level_ 检查是为了确保我们只更新位于 ORAM 层级中的节点
-        if (triple->level < target_level && triple->level >= client_->min_level_) {
-            triple->level = target_level;
-        }
-    }
+    vec_hashtable_[target_level]->stash.clear();
+
     cout<< all_shuffled_branchs.size() <<" data is shuffled and moved to level: "<<target_level<<endl;
+    cout<<"---------------------------------------end shuffle---------------------------------------\n";
 }
 
 //access some level with exactly level_i and access other levels with dummy
-Branch* HOTree::Access(uint64_t id_counter_combine, int level_i) {
-    int id = (int)(id_counter_combine>>32);
+Branch* HOTree::Access(uint64_t id, int counter_for_lastest_data, int level_i) {
+    uint64_t id_counter_combine = combine_unique(id, counter_for_lastest_data);
     Branch* result_branch = nullptr;
     
     client_->communication_round_trip_ += 0.5; // only one trip
@@ -210,7 +213,7 @@ Branch* HOTree::Access(uint64_t id_counter_combine, int level_i) {
                 client_->communication_volume_ += BlockSize*2; // two blocks
                 for(auto& elem : vec_temp_branch) {
                     if(elem != nullptr) {
-                        if(elem->id == id) {
+                        if(elem->id == id && elem->counter_for_lastest_data == counter_for_lastest_data) {
                             result_branch = new Branch(elem);
                         }
                     }   
@@ -229,10 +232,30 @@ Branch* HOTree::Access(uint64_t id_counter_combine, int level_i) {
 
 Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data) {
     Branch* result_branch = nullptr;
-    
     client_->communication_round_trip_ += 0.5; // only half trip, no need to put back
 
     /*--------------------------------find the data using standard Hierarchical ORAM, compute index using real id untill found---------------------*/
+    for(int i = client_->min_level_; i < client_->vec_hotree_level_i_is_empty_.size(); i++) {
+        if(client_->vec_hotree_level_i_is_empty_[i]) {
+            continue; // empty level pass
+        }
+        else {
+            // lookup cuckoo stash to find the id if data is not in hash table. If found, delete from cuckoo stash and move to stash
+            if(result_branch == nullptr) {
+                auto& level_stash = client_->vector_every_level_stash_[i];
+                auto it = std::find_if(level_stash.begin(), level_stash.end(), [&](Branch* b) {
+                    return b != nullptr && b->id == id && b->counter_for_lastest_data == counter_for_lastest_data;
+                });
+                if (it != level_stash.end()) {
+                    result_branch = *it; 
+                    level_stash.erase(it);
+                }
+            }
+        }
+    }
+    if(result_branch != nullptr) return result_branch;
+
+    /*--------------------------------find the data on server tables---------------------*/
     for(int i = client_->min_level_; i < client_->vec_hotree_level_i_is_empty_.size(); i++) {
         if(client_->vec_hotree_level_i_is_empty_[i]) {
             continue; // empty level pass
@@ -250,7 +273,7 @@ Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data) {
                 for(auto& elem : vec_temp_branch) {
                     if(elem != nullptr) {
                         elem->trueData = client_->cryptor_->aes_decrypt(elem->trueData, i);
-                        if(elem->id == id) {
+                        if(elem->id == id && elem->counter_for_lastest_data == counter_for_lastest_data) {
                             result_branch = new Branch(elem);
                         }
                     }   
@@ -279,7 +302,6 @@ Branch* HOTree::Retrieve(Client* client_, Triple*& triple) {
         auto it = client_->stash_.find(id);
         if(it != client_->stash_.end()) {
             child_branch = it->second;
-            return child_branch;
         }
     }
 
@@ -292,40 +314,34 @@ Branch* HOTree::Retrieve(Client* client_, Triple*& triple) {
         if (it != level_stash.end()) {
             child_branch = *it; 
             level_stash.erase(it);
-
-            child_branch->level = -1;
-            client_->stash_[id] = child_branch;
-            triple->counter_for_lastest_data++;
-            child_branch->counter_for_lastest_data = triple->counter_for_lastest_data;
-            return child_branch;
         }
     }
 
-    
     /*----------------------------------Find data in Server cuckoo tables-----------------------------------------*/
     if(child_branch == nullptr) {
         // child_branch is not nullptr if prediction is right.
-        child_branch = Access(combine_unique(id, counter_for_lastest_data), level_i);
+        child_branch = Access(id, counter_for_lastest_data, level_i);
         if(child_branch!=nullptr) {
             // if getting the data, decryt it and update its status
             child_branch->trueData = client_->cryptor_->aes_decrypt(child_branch->trueData, level_i); // decrypt the data using secret key in level i
-            child_branch->level = -1;
-            client_->stash_[id] = child_branch; // move the data to stash
-            triple->level = client_->get_first_empty_level();
-            triple->counter_for_lastest_data++;
-            child_branch->counter_for_lastest_data = triple->counter_for_lastest_data; // counter++ means adding an access
-            if(id == debug_id) {
-                cout<<"id "<< id <<" counter have update: "<< child_branch->counter_for_lastest_data <<endl;
-            }
         }
         else { // if not found, target id must be the level gerter than prediction level
             child_branch = Self_healing_Access(id, counter_for_lastest_data);
-            child_branch->level = -1;
-            client_->stash_[id] = child_branch; // move the data to stash
-            triple->level = client_->get_first_empty_level();
-            triple->counter_for_lastest_data++;
-            child_branch->counter_for_lastest_data = triple->counter_for_lastest_data; // counter++ means adding an access
         }
+    }
+
+    /*----------------------------------update prediction values-----------------------------------------*/
+    // 取回数据后，不管是从本地还是server上取的，都已经确定访问了id一次，且取回来了，因此counter++，
+    child_branch->level = -1;
+    client_->stash_[id] = child_branch; // move the data to stash
+    triple->level = client_->get_first_empty_level();
+    if(id == debug_id) {
+        cout<<"id "<< id <<" counter before updating: "<< child_branch->counter_for_lastest_data <<endl;
+    }
+    triple->counter_for_lastest_data++;
+    child_branch->counter_for_lastest_data = triple->counter_for_lastest_data;
+    if(id == debug_id) {
+        cout<<"id "<< id <<" counter have update: "<< child_branch->counter_for_lastest_data <<endl;
     }
     return child_branch;
 }
@@ -348,7 +364,7 @@ vector<pair<double, DataRecord>> HOTree::SearchTopK(double qx, double qy, string
     // 3. 初始层入队
     for (auto & triple : root) {
         // 确定triple->id是要取的，那么先取回，然后更新triple
-        auto child_branch = Retrieve(client_, triple);
+        auto child_branch = Retrieve(client_, triple); //更新操作已经在Retrieve()里做了
         
         double score = client_->CalcuTestSPaceRele(child_branch, queryBranch);
         pq.push({score, child_branch});
@@ -382,14 +398,10 @@ vector<pair<double, DataRecord>> HOTree::SearchTopK(double qx, double qy, string
             vector<Triple*> vec_child_triples = curr->child_triple;
             if (vec_child_triples.size() > 0) {
                 for (auto* triple : vec_child_triples) {
-                    int level_i = triple->level;
-                    int id = triple->id;
-                    int counter_for_lastest_data = triple->counter_for_lastest_data;
-
                     // It is for true, triple.id will be accessed. So we change its level in advance
                     
-                    if(curr->level > level_i) {
-                        printf("curr id %d (in level %d) have child id %d in level %d \n", curr->id, curr->level, id, level_i);
+                    if(curr->level > triple->level) {
+                        printf("curr id %d (in level %d) have child id %d in level %d \n", curr->id, curr->level, triple->id, triple->level);
                     }
                     auto child_branch = Retrieve(client_, triple);
 
@@ -553,5 +565,6 @@ void HOTree::Build(vector<DataRecord>& raw_data, Client* &client) {
         temp_branch->trueData = client_->cryptor_->aes_decrypt(temp_branch->trueData, L);
         client_->vector_every_level_stash_[L].push_back(temp_branch);
     }
+    vec_hashtable_[L]->stash.clear();
     client_->vec_hotree_level_i_is_empty_[L] = false; 
 }

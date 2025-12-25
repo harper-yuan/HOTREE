@@ -98,10 +98,6 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
             table[p1].branch = item;
             table[p1].occupied = true;
             current_count++;
-            // if(1) {
-            if(item->id == debug_id) {
-                std::cout<<"In insert id "<< item->id <<" level "<< HOTREE_level_ <<" p1: "<<p1 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size "<< table.size()<< " counter "<< item->counter_for_lastest_data<<std::endl;
-            }
             return;
         }
 
@@ -110,10 +106,6 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
             table[p2].branch = item;
             table[p2].occupied = true;
             current_count++;
-            // if(1) {
-            if(item->id == debug_id) {
-                std::cout<<"In insert id "<< item->id <<" level "<<HOTREE_level_ <<" p2: "<<p2 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< item->counter_for_lastest_data<<std::endl;
-            }
             return;
         }
 
@@ -125,10 +117,10 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
     size_t p1 = client->compute_hash1(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
     size_t p2 = client->compute_hash2(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
     if(table[p1].branch->id == debug_id) {
-        std::cout<<"In insert id "<< item->id <<" level "<<HOTREE_level_ <<" p1: "<<p1 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< item->counter_for_lastest_data<<std::endl;    
+        std::cout<<"In insert id "<< table[p1].branch->id <<" level "<<HOTREE_level_ <<" p1: "<<p1 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< table[p1].branch->counter_for_lastest_data<<std::endl;    
     }
     if(table[p2].branch->id == debug_id) {
-        std::cout<<"In insert id "<< item->id <<" level "<<HOTREE_level_ <<" p1: "<<p2 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< item->counter_for_lastest_data<<std::endl;    
+        std::cout<<"In insert id "<< table[p2].branch->id <<" level "<<HOTREE_level_ <<" p2: "<<p2 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< table[p2].branch->counter_for_lastest_data<<std::endl;    
     }
 
     if (stash.size() < STASH_CAPACITY) {
