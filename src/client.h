@@ -1,12 +1,14 @@
 #pragma once
 #include "cryptor.h"
-#include "tree.h"
 #include "define.h"
+#include "Branch.h"
+#include <vector>
+#include <unordered_map>
 
 class Client {
 public:
     Cryptor* cryptor_;
-    std::vector<Branch*> stash_;     // save the stash temprorary data
+    std::unordered_map<int, Branch*> stash_;     // save the stash temprorary data
     std::vector<size_t> vec_seed1_; // save the 1st hash seed every level
     std::vector<size_t> vec_seed2_; // save the 2nd hash seed every level
     std::vector<bool> vec_hotree_level_i_is_empty_; // flag if the level i is empty
@@ -30,6 +32,11 @@ public:
     size_t compute_hash2(uint64_t id, size_t level_i, size_t mod_size) const;
     size_t compute_hash(uint64_t id, size_t mod_size) const;
 
+    int get_first_empty_level();
+
+    double CalcuTextRelevancy(std::vector<double> weight1, std::vector<double> weight2);
+
+    double CalcuTestSPaceRele(Branch *n1, Branch *n2);
     // Core Logic: Decrypt -> Sort based on Hash Bit -> Encrypt
     void ObliviousMergeSplit(
         std::vector<Branch*>& bucket_in_0,

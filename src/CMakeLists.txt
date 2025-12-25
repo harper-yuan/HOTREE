@@ -1,5 +1,6 @@
 add_library(HOTREE
     tree.cpp
+    Branch.cpp
     DataReader.cpp
     cryptor.cpp
     client.cpp

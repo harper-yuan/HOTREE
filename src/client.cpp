@@ -5,6 +5,7 @@ Client::Client(int L): gen(rd()), dis(0, 0xFFFFFFFF) {
     cryptor_ = new Cryptor(L);
     communication_volume_ = 0;
     communication_round_trip_ = 0;
+    stash_.reserve(Z); 
 
     // Ensure we have enough seeds. 
     // Note: For Cuckoo Table shuffle, we might need a specific seed. 
@@ -32,6 +33,44 @@ void Client::UpdateSeed(size_t level_i) {
 Client::~Client() {
     delete cryptor_;
     cryptor_ = nullptr;
+}
+
+int Client::get_first_empty_level() {
+    int result_level;
+    for(int level_i = min_level_; level_i < vec_hotree_level_i_is_empty_.size(); level_i++) {
+        if(!vec_hotree_level_i_is_empty_[level_i]) {
+            if(level_i == vec_hotree_level_i_is_empty_.size()-1) { //last level
+                result_level = level_i;
+            }
+            continue;
+        }
+        else {
+            result_level = level_i; // mark the level id that all data will be removed to
+            break;
+        }
+    }
+    return result_level;
+}
+
+double Client::CalcuTextRelevancy(std::vector<double> weight1, std::vector<double> weight2) {
+    double rele = 0;
+    double sum1 = 0, sum2 = 0;
+    size_t n = std::min(weight1.size(), weight2.size());
+    for(size_t i = 0; i < n; i++) {
+        rele += weight1[i] * weight2[i];
+        sum1 += weight1[i] * weight1[i];
+        sum2 += weight2[i] * weight2[i];
+    }
+    if (sum1 == 0 || sum2 == 0) return 0.0;
+    return rele / (sqrt(sum1) * sqrt(sum2));
+}
+
+double Client::CalcuTestSPaceRele(Branch *n1, Branch *n2) {
+    double text = CalcuTextRelevancy(n1->weight, n2->weight);
+    double dist = n1->m_rect.MinDist(n2->m_rect);
+    double spaceScore = 1.0 / (1.0 + dist); 
+    double rele = ALPHA * spaceScore + (1.0 - ALPHA) * text;
+    return rele;
 }
 
 size_t Client::compute_hash(uint64_t id, size_t mod_size) const {
@@ -107,7 +146,7 @@ void Client::ObliviousMergeSplit(
     int mask = 1 << check_bit;
 
     for (auto* elem : pool) {
-        if (compute_hash(elem->id, pow(2, num_levels_shuffle)) & mask) {
+        if (compute_hash(combine_unique(elem->id, elem->counter_for_lastest_data), pow(2, num_levels_shuffle)) & mask) {
             elem->trueData = cryptor_->aes_encrypt(elem->trueData, HOTREE_level);
             real_elements_1.push_back(elem);
         } else {
@@ -161,7 +200,7 @@ void Client::ObliviousMergeSplit_firstlevel(
     int mask = 1 << check_bit;
 
     for (auto* elem : pool) {
-        if (compute_hash(elem->id, pow(2, num_levels_shuffle)) & mask) {
+        if (compute_hash(combine_unique(elem->id, elem->counter_for_lastest_data), pow(2, num_levels_shuffle)) & mask) {
             elem->trueData = cryptor_->aes_encrypt(elem->trueData, HOTREE_level);
             real_elements_1.push_back(elem);
         } else {

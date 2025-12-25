@@ -16,26 +16,31 @@
 // --- 全局常量 ---
 const int B = 4096; // 模拟 Block 大小
 
-// 声明全局字典，以便 Branch::CalcuKeyWordRele 使用 (兼容 Branch.h 写法)
+// 声明全局字典，以便 PlainBranch::CalcuKeyWordRele 使用 (兼容 PlainBranch.h 写法)
 extern std::vector<std::string> dic_str;
 extern std::map<std::string, int> dic_map;
 
 // --- 前向声明 ---
 class Node;
 
-// --- Rectangle 结构 (参考 Branch.h) ---
-struct Rectangle {
-    double min_Rec[2];
-    double max_Rec[2];
-
-    Rectangle();
-    double Area();
-    bool operator==(const Rectangle& other) const { return false; }
-    double MinDist(const Rectangle& other) const;
+struct Child_Triple {
+    int id;
+    
+    int level;
+    int counter_for_lastest_data;
+    
+    // 构造函数
+    Child_Triple(int a, int b, int c) : id(a), level(b), counter_for_lastest_data(c) {}
+    
+    // 也可以重载输出运算符
+    friend std::ostream& operator<<(std::ostream& os, const Child_Triple& t) {
+        os << "(" << t.id << ", " << t.level << ", " << t.counter_for_lastest_data << ")";
+        return os;
+    }
 };
 
-// --- Branch 结构 (参考 Branch.h) ---
-class Branch {
+// --- PlainBranch 结构 (参考 PlainBranch.h) ---
+class PlainBranch {
 public:
     Node* childNode;          // 保存孩子节点
     Node* curNode;            // 当前节点
@@ -46,39 +51,41 @@ public:
     bool is_empty_data;       // 记录是否为空数据
     bool is_dummy_for_shuffle;// just for shuffle
 
+    int counter_for_lastest_data; //记录最新数据的计数器
     int id;
     int level;
-    Branch* pointBranch;
-    std::vector<Branch*> child;
-    Branch* partent;
+    PlainBranch* pointBranch;
+    std::vector<PlainBranch*> child;
+    std::vector<Child_Triple> child_triple;
+    PlainBranch* partent;
     int textID;
 
-    Branch();
-    Branch(bool dummy);
-    Branch(bool empty_data, bool dummy_for_shuffle);
+    PlainBranch();
+    PlainBranch(bool dummy);
+    PlainBranch(bool empty_data, bool dummy_for_shuffle);
 
-    bool operator<(const Branch& other) const;
+    bool operator<(const PlainBranch& other) const;
     
-    void textUpdate(Branch* mbranch);
+    void textUpdate(PlainBranch* mbranch);
     void LowerText(std::string &text);
     int levenshteinDistance(const std::string& s1, const std::string& s2);
     double similarity(const std::string& s1, const std::string& s2);
     
-    // 按照 Branch.h 定义，依赖全局 dic_str
+    // 按照 PlainBranch.h 定义，依赖全局 dic_str
     void CalcuKeyWordRele(std::string& text);
     void CalcuKeyWordWeight(std::string &text);
 
-    void keyWeightUpdate(Branch *nBranch);
+    void keyWeightUpdate(PlainBranch *nBranch);
     void rectUpdate(Rectangle *nRect);
     
-    bool operator==(const Branch& other) const;
+    bool operator==(const PlainBranch& other) const;
 };
 
-// --- SearchItem (辅助结构) ---
-struct SearchItem {
+// --- PlainSearchItem (辅助结构) ---
+struct PlainSearchItem {
     double score;
-    Branch* branch;
-    bool operator<(const SearchItem& other) const {
+    PlainBranch* branch;
+    bool operator<(const PlainSearchItem& other) const {
         return score < other.score; 
     }
 };
@@ -88,7 +95,7 @@ class Node {
 public:
     int count; //记录有多少个真实节点
     // std::vector<InvertedFile> child_iFile; // 暂时省略倒排索引以简化
-    std::vector<Branch*> mBranch;
+    std::vector<PlainBranch*> mBranch;
     Rectangle m_rect;
     int id;
     Node* parentNode;
@@ -103,7 +110,7 @@ public:
     void setCount();
     
     // 核心更新函数
-    void rectUpdate(Branch *m_branch);
+    void rectUpdate(PlainBranch *m_branch);
     void initRectangle();
     
     // 虚拟节点相关 (明文版简化)
@@ -112,7 +119,7 @@ public:
     // 计算相关
     virtual double CalcuTextRelevancy(std::vector<double> weight1, std::vector<double> weight2);
     virtual double CalcuSpaceIncrease(Rectangle pre, Rectangle newr);
-    virtual double CalcuTestSPaceRele(Branch *n1, Branch *n2);
+    virtual double CalcuTestSPaceRele(PlainBranch *n1, PlainBranch *n2);
     virtual Rectangle CombineRect(Rectangle *rect1, Rectangle *rect2);
     virtual std::vector<double> CombineKeyWords(std::vector<double> weight1, std::vector<double> weight2);
     

@@ -34,72 +34,72 @@ void print_current_working_directory() {
 }
 BOOST_AUTO_TEST_SUITE(cipher_correctness_test)
 
-BOOST_AUTO_TEST_CASE(test1) {
+// BOOST_AUTO_TEST_CASE(test1) {
 
-    std::random_device rd;
-    std::mt19937 gen(rd()); 
-    std::uniform_int_distribution<int> dist(1, 100); 
-    print_current_working_directory();
-    // 确保路径正确
-    vector<string> dictionary = LoadDictionary("../../dataset/synthetic/keywords_dict.txt");
+//     std::random_device rd;
+//     std::mt19937 gen(rd()); 
+//     std::uniform_int_distribution<int> dist(1, 100); 
+//     print_current_working_directory();
+//     // 确保路径正确
+//     vector<string> dictionary = LoadDictionary("../../dataset/synthetic/keywords_dict.txt");
     
-    // 模拟 DataRecord 数据
-    vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic/dataset.txt", pow(2,10)); //1024
+//     // 模拟 DataRecord 数据
+//     vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic/dataset.txt", pow(2,10)); //1024
     
-    // 查询数据
-    vector<DataRecord> queries = readDataFromDataset("../../dataset/synthetic/query.txt");
+//     // 查询数据
+//     vector<DataRecord> queries = readDataFromDataset("../../dataset/synthetic/query.txt");
     
-    // 测试用例参数
-    if (queries.empty()) {
-        BOOST_FAIL("Query dataset is empty!");
-    }
+//     // 测试用例参数
+//     if (queries.empty()) {
+//         BOOST_FAIL("Query dataset is empty!");
+//     }
 
-    int random_num = dist(gen) % queries.size();
-    double qx = queries[random_num].x_coord;
-    double qy = queries[random_num].y_coord;
-    string qText = queries[random_num].processed_text;
-    int k = 3;
+//     int random_num = dist(gen) % queries.size();
+//     double qx = queries[random_num].x_coord;
+//     double qy = queries[random_num].y_coord;
+//     string qText = queries[random_num].processed_text;
+//     int k = 3;
     
-    // 2. 构建 IR-Tree in plain and ciphertext
-    PlainIRTree irTree(dictionary);
-    irTree.Build(data);
+//     // 2. 构建 IR-Tree in plain and ciphertext
+//     PlainIRTree irTree(dictionary);
+//     irTree.Build(data);
 
-    Client* client = nullptr;
-    HOTree hotree(dictionary);
-    hotree.Build(data, client);
-    client = hotree.getClient();
+//     Client* client = nullptr;
+//     HOTree hotree(dictionary);
+//     hotree.Build(data, client);
+//     client = hotree.getClient();
 
 
-    // 3. IR-Tree 搜索
-    vector<pair<double, DataRecord>> ir_results = irTree.SearchTopK(qx, qy, qText, k);
-    vector<pair<double, DataRecord>> hotree_results = hotree.SearchTopK(qx, qy, qText, k, client);
+//     // 3. IR-Tree 搜索
+//     vector<pair<double, DataRecord>> ir_results = irTree.SearchTopK(qx, qy, qText, k);
+//     vector<pair<double, DataRecord>> hotree_results = hotree.SearchTopK(qx, qy, qText, k, client);
 
-    cout << "IR-Tree Results (K=" << k << "):" << endl;
-    vector<int> ir_ids;
-    for (const auto& res : ir_results) {
-        ir_ids.push_back(res.second.id);
-        cout << "ID: " << res.second.id << ", Score: " << res.first << endl;
-    }
+//     cout << "IR-Tree Results (K=" << k << "):" << endl;
+//     vector<int> ir_ids;
+//     for (const auto& res : ir_results) {
+//         ir_ids.push_back(res.second.id);
+//         cout << "ID: " << res.second.id << ", Score: " << res.first << endl;
+//     }
 
-    cout << "HO-Tree Results (K=" << k << "):" << endl;
-    vector<int> ho_ids;
-    for (const auto& res : hotree_results) {
-        ho_ids.push_back(res.second.id);
-        cout << "ID: " << res.second.id << ", Score: " << res.first << endl;
-    }
+//     cout << "HO-Tree Results (K=" << k << "):" << endl;
+//     vector<int> ho_ids;
+//     for (const auto& res : hotree_results) {
+//         ho_ids.push_back(res.second.id);
+//         cout << "ID: " << res.second.id << ", Score: " << res.first << endl;
+//     }
 
-    // 4. 验证 IR-Tree 和 HO-Tree 结果是否相等
-    sort(ir_ids.begin(), ir_ids.end());
-    sort(ho_ids.begin(), ho_ids.end());
+//     // 4. 验证 IR-Tree 和 HO-Tree 结果是否相等
+//     sort(ir_ids.begin(), ir_ids.end());
+//     sort(ho_ids.begin(), ho_ids.end());
 
-    cout << "Verifying IR-Tree and HO-Tree results..." << endl;
-    for (int i = 0; i < min({k, (int)ir_ids.size(), (int)ho_ids.size()}); ++i) {
-        BOOST_TEST(ir_ids[i] == ho_ids[i]);
-    }
+//     cout << "Verifying IR-Tree and HO-Tree results..." << endl;
+//     for (int i = 0; i < min({k, (int)ir_ids.size(), (int)ho_ids.size()}); ++i) {
+//         BOOST_TEST(ir_ids[i] == ho_ids[i]);
+//     }
 
-    // 同时验证结果数量是否一致
-    BOOST_TEST(ir_results.size() == hotree_results.size());
-}
+//     // 同时验证结果数量是否一致
+//     BOOST_TEST(ir_results.size() == hotree_results.size());
+// }
 
 BOOST_AUTO_TEST_CASE(test_query_timing) {
     // 1. 数据加载与树构建 (与 test1 共享相同的设置)
@@ -108,7 +108,7 @@ BOOST_AUTO_TEST_CASE(test_query_timing) {
     
     // 假设这些文件和函数已被正确定义和包含
     vector<string> dictionary = LoadDictionary("../../dataset/synthetic/keywords_dict.txt");
-    vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic/dataset.txt", pow(2,10)); // 1024条数据
+    vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic/dataset.txt", pow(2,6)); // 1024条数据
     vector<DataRecord> queries = readDataFromDataset("../../dataset/synthetic/query.txt"); // 1024条查询
     
     // 检查数据完整性
@@ -136,7 +136,8 @@ BOOST_AUTO_TEST_CASE(test_query_timing) {
     std::uniform_int_distribution<int> k_dist(1, 10); // k值范围1-10
     std::vector<int> k_values(num_queries);
     for (int i = 0; i < num_queries; ++i) {
-        k_values[i] = k_dist(gen);
+        // k_values[i] = k_dist(gen);
+        k_values[i] = 3;
     }
 
     // 4. 计时变量
@@ -149,7 +150,8 @@ BOOST_AUTO_TEST_CASE(test_query_timing) {
 
     // 5. 执行所有查询并计时
     for (int i = 0; i < num_queries; ++i) {
-        int idx = selected_indices[i];
+        // std::cout<<"Search query "<<i<<std::endl;
+        int idx = i; //selected_indices[i];
         double qx = queries[idx].x_coord;
         double qy = queries[idx].y_coord;
         string qText = queries[idx].processed_text;

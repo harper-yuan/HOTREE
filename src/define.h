@@ -19,10 +19,11 @@
 // --- 1. 配置参数 ---
 constexpr const int MAX_SIZE = 6;        // 节点最大容量 (分支数)
 constexpr const double ALPHA = 0.5;      // 权重因子：0.5 表示空间和文本同等重要
-constexpr const int Z = 128;            // Client stash size
-constexpr const size_t cuckoo_stash_size = 4;
-constexpr const size_t BlockSize = 256; // padding every encrypted data to 4096 Bytes
+constexpr const int Z = 16;            // Client stash size
+constexpr const size_t cuckoo_stash_size = 20;
+constexpr const size_t BlockSize = 4096; // padding every encrypted data to 4096 Bytes
 constexpr const int num_threads = 16; 
+constexpr const int debug_id = -12;
 
 // --- 2. 数据结构定义 ---
 struct DataRecord {
@@ -32,6 +33,19 @@ struct DataRecord {
     double x_coord;       // X 坐标 (p1)
     double y_coord;       // Y 坐标 (p2)
 };
+
+
+// --- Rectangle 结构 (参考 PlainBranch.h) ---
+struct Rectangle {
+    double min_Rec[2];
+    double max_Rec[2];
+
+    Rectangle();
+    double Area();
+    bool operator==(const Rectangle& other) const { return false; }
+    double MinDist(const Rectangle& other) const;
+};
+
 
 static std::string padZero(const std::string& data) {
     if (data.size() > BlockSize) {
@@ -66,4 +80,10 @@ static std::string unpadZero(const std::string& paddedData) {
     
     // 返回原始数据
     return paddedData.substr(0, endPos);
+}
+
+static uint64_t combine_unique(int id, int counter) {
+    // 将 id 放在高 32 位，counter 放在低 32 位
+    // 注意：必须先转成 uint64_t 否则位移会溢出
+    return (static_cast<uint64_t>(id) << 32) | static_cast<uint32_t>(counter);
 }

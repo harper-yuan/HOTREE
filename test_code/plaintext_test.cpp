@@ -38,7 +38,7 @@ BOOST_AUTO_TEST_CASE(test1) {
     std::random_device rd;
     std::mt19937 gen(rd()); 
     std::uniform_int_distribution<int> dist(1, 100); 
-    print_current_working_directory();
+    // print_current_working_directory();
     // 确保路径正确
     vector<string> dictionary = LoadDictionary("../../dataset/synthetic/keywords_dict.txt");
     
@@ -75,7 +75,7 @@ BOOST_AUTO_TEST_CASE(test1) {
 
     // 4. 暴力验证
     vector<pair<double, int>> brute_scores;
-    Branch queryBranch;
+    PlainBranch queryBranch;
     queryBranch.m_rect.min_Rec[0] = queryBranch.m_rect.max_Rec[0] = qx;
     queryBranch.m_rect.min_Rec[1] = queryBranch.m_rect.max_Rec[1] = qy;
     // 使用 GetTextWeight 辅助函数来获取权重，模拟内部逻辑
@@ -84,7 +84,7 @@ BOOST_AUTO_TEST_CASE(test1) {
     Node tempNode; // 用于调用静态计算方法
 
     for (const auto& item : data) {
-        Branch dataBranch;
+        PlainBranch dataBranch;
         dataBranch.id = item.id;
         dataBranch.weight = irTree.GetTextWeight(item.processed_text);
         dataBranch.m_rect.min_Rec[0] = dataBranch.m_rect.max_Rec[0] = item.x_coord;

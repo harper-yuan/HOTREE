@@ -76,7 +76,7 @@ BOOST_AUTO_TEST_CASE(test_cuckoo_hash_correctness) {
         int idx = dist(gen);
         DataRecord target = data[idx];
 
-        Branch* result = cuckooTable.find(target.id, client);
+        Branch* result = cuckooTable.find(combine_unique(target.id, 0), client);
         
         if (result == nullptr) {
             BOOST_ERROR("Lookup failed for existing ID: " << target.id);
@@ -134,7 +134,7 @@ BOOST_AUTO_TEST_CASE(test_cuckoo_hash_correctness) {
 
 //     #pragma omp parallel for reduction(+:check_sum)
 //     for (size_t i = 0; i < QUERY_COUNT; ++i) {
-//         Branch* res = cuckooTable.find(query_ids[i], client);
+//         Branch* res = cuckooTable.find(combine_unique(query_ids[i], 0), client);
 //         if (res != nullptr) {
 //             check_sum += res->id; 
 //         }
@@ -203,7 +203,7 @@ BOOST_AUTO_TEST_CASE(test_oblivious_shuffle_correctness_and_perf) {
 
     int found_count = 0;
     for (int id : unique_ids) {
-        Branch* res = cuckooTable.find(id, client);
+        Branch* res = cuckooTable.find(combine_unique(id, 0), client);
         if (res != nullptr && res->id == id) {
             found_count++;
         }
@@ -214,9 +214,10 @@ BOOST_AUTO_TEST_CASE(test_oblivious_shuffle_correctness_and_perf) {
 
     // 4. 性能报告
     double comm_vol_mb = (double)client->communication_volume_ / (1024.0 * 1024.0);
+    double comm_round_trips = (double)client->communication_round_trip_;
     std::cout << "Shuffle Time    : " << duration << " ms" << std::endl;
     std::cout << "Comm Volume     : " << comm_vol_mb << " MB" << std::endl;
-
+    std::cout << "Comm Round     : " << comm_round_trips << std::endl;
     // 清理内存
     for (auto p : branch_pool) delete p;
     delete client;

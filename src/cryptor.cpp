@@ -205,11 +205,6 @@ Branch Cryptor::decrypt_element(const std::string& cipher) {
     aes_decrypt(cipher, plain);
     
     Branch elem;
-    // 初始化指针为空，防止随机值导致析构崩溃
-    elem.childNode = nullptr;
-    elem.curNode = nullptr;
-    elem.partent = nullptr;
-    elem.pointBranch = nullptr;
 
     size_t offset = 0;
 
@@ -254,10 +249,6 @@ Branch Cryptor::decrypt_element(const std::string& cipher, int i) {
     
     Branch elem;
     // 初始化指针为空，防止随机值导致析构崩溃
-    elem.childNode = nullptr;
-    elem.curNode = nullptr;
-    elem.partent = nullptr;
-    elem.pointBranch = nullptr;
 
     size_t offset = 0;
 

@@ -6,13 +6,12 @@
 #include <cryptopp/modes.h>
 #include <cryptopp/osrng.h>
 #include <cryptopp/filters.h>
-
 #include <string>
-
 // 最后包含你的自定义头文件
 #include "define.h"
-#include "tree.h"
+#include "Branch.h"
 
+class Branch;
 class Cryptor {
 private:
     int L_; //Hierarchical level

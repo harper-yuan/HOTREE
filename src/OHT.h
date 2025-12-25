@@ -2,7 +2,7 @@
 #include <vector>
 #include <cstddef>
 #include <omp.h>
-#include "tree.h"
+#include "Branch.h"
 #include "define.h"
 #include "client.h"
 
@@ -23,7 +23,7 @@ public:
 
     void oblivious_shuffle(Client* client);
     // 修改：处理指针向量
-    void oblivious_shuffle_and_insert(std::vector<Branch*> all_elements, std::vector<int> branchs_level_belong_to, Client* client);
+    void oblivious_shuffle_and_insert(std::vector<Branch*>& all_elements, std::vector<int> branchs_level_belong_to, Client* client);
 
 public:
     struct Entry {
