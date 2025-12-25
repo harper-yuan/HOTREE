@@ -91,7 +91,7 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
         return; 
     }
 
-    static std::mt19937 rng(123); 
+    static std::mt19937 rng(global_seed); 
     for (int i = 0; i < MAX_KICKS; ++i) {
         size_t p1 = client->compute_hash1(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
         if (!table[p1].occupied) {
@@ -121,6 +121,14 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
         bool kick_p1 = (rng() % 2) == 0;
         size_t victim_pos = kick_p1 ? p1 : p2;
         std::swap(item, table[victim_pos].branch);
+    }
+    size_t p1 = client->compute_hash1(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
+    size_t p2 = client->compute_hash2(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
+    if(table[p1].branch->id == debug_id) {
+        std::cout<<"In insert id "<< item->id <<" level "<<HOTREE_level_ <<" p1: "<<p1 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< item->counter_for_lastest_data<<std::endl;    
+    }
+    if(table[p2].branch->id == debug_id) {
+        std::cout<<"In insert id "<< item->id <<" level "<<HOTREE_level_ <<" p1: "<<p2 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< item->counter_for_lastest_data<<std::endl;    
     }
 
     if (stash.size() < STASH_CAPACITY) {
@@ -156,15 +164,14 @@ void CuckooTable::rehash(size_t new_size, Client* client) {
 }
 
 void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_elements, std::vector<int> branchs_level_belong_to, Client* client) {
-
     table.assign(pow(2,HOTREE_level_), Entry());
     stash.clear();
     current_count = 0;
     client->UpdateSeed(HOTREE_level_);
     for(auto &elem : all_elements) {
-        // if(elem->id == debug_id) {
-        //     printf("id %d exist with counter %d in OHT.cpp\n", elem->id, elem->counter_for_lastest_data);
-        // }
+        if(elem->id == debug_id) {
+            printf("id %d exist with counter %d in OHT.cpp\n", elem->id, elem->counter_for_lastest_data);
+        }
         insert(elem, client);
         // printf("insert id %d in level %d with table size counter %d\n", elem->id, HOTREE_level_, current_count);
     }

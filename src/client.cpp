@@ -1,7 +1,8 @@
 #include "client.h"
 #include <random>
 
-Client::Client(int L): gen(rd()), dis(0, 0xFFFFFFFF) {
+// Client::Client(int L): gen(rd()), dis(0, 0xFFFFFFFF) {
+Client::Client(int L): gen(global_seed), dis(0, 0xFFFFFFFF) {
     cryptor_ = new Cryptor(L);
     communication_volume_ = 0;
     communication_round_trip_ = 0;

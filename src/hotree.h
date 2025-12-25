@@ -26,7 +26,7 @@ public:
     void Eviction(Client* client);
     Client* getClient();
     std::vector<std::pair<double, DataRecord>> SearchTopK(double qx, double qy, std::string qText, int k, Client* client);
-    Branch* Retrieve(int level_i, int id, int counter_for_lastest_data, Client* client_, Triple* triple);
+    Branch* Retrieve(Client* client_, Triple*& triple);
     Branch* Access(uint64_t id, int level_i);
     Branch* Self_healing_Access(int id, int counter_for_lastest_data);
 

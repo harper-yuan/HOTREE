@@ -23,7 +23,9 @@ constexpr const int Z = 16;            // Client stash size
 constexpr const size_t cuckoo_stash_size = 20;
 constexpr const size_t BlockSize = 4096; // padding every encrypted data to 4096 Bytes
 constexpr const int num_threads = 16; 
-constexpr const int debug_id = -12;
+constexpr const int debug_id = 12;
+constexpr const int child_debug_id = -18;
+constexpr const int global_seed = 200;
 
 // --- 2. 数据结构定义 ---
 struct DataRecord {

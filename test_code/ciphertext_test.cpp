@@ -137,7 +137,7 @@ BOOST_AUTO_TEST_CASE(test_query_timing) {
     std::vector<int> k_values(num_queries);
     for (int i = 0; i < num_queries; ++i) {
         // k_values[i] = k_dist(gen);
-        k_values[i] = 3;
+        k_values[i] = 10;
     }
 
     // 4. 计时变量
@@ -150,7 +150,7 @@ BOOST_AUTO_TEST_CASE(test_query_timing) {
 
     // 5. 执行所有查询并计时
     for (int i = 0; i < num_queries; ++i) {
-        // std::cout<<"Search query "<<i<<std::endl;
+        std::cout<<"Search query "<<i<<std::endl;
         int idx = i; //selected_indices[i];
         double qx = queries[idx].x_coord;
         double qy = queries[idx].y_coord;
