@@ -76,7 +76,7 @@ BOOST_AUTO_TEST_CASE(test_cuckoo_hash_correctness) {
         int idx = dist(gen);
         DataRecord target = data[idx];
 
-        Branch* result = cuckooTable.find(combine_unique(target.id, 0), client);
+        Branch* result = cuckooTable.find(target.id, 0, client);
         
         if (result == nullptr) {
             BOOST_ERROR("Lookup failed for existing ID: " << target.id);
@@ -203,7 +203,7 @@ BOOST_AUTO_TEST_CASE(test_oblivious_shuffle_correctness_and_perf) {
 
     int found_count = 0;
     for (int id : unique_ids) {
-        Branch* res = cuckooTable.find(combine_unique(id, 0), client);
+        Branch* res = cuckooTable.find(id, 0, client);
         if (res != nullptr && res->id == id) {
             found_count++;
         }

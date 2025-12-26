@@ -45,6 +45,7 @@ int main() {
         
         vector<string> dictionary = LoadDictionary(ds.dict_path);
         vector<DataRecord> data = readDataFromDataset(ds.data_path, FIXED_N);
+        vector<DataRecord> sampled_queries = readDataFromDataset(ds.data_path, FIXED_N);
         if (data.empty()) continue;
 
         // 构建索引 (固定 N，只需构建一次)
@@ -55,7 +56,6 @@ int main() {
 
         for (int k : K_VALUES) {
             // 随机打乱以选择查询点
-            vector<DataRecord> sampled_queries = data;
             std::shuffle(sampled_queries.begin(), sampled_queries.end(), gen);
 
             double total_time = 0;

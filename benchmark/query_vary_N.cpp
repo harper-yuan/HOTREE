@@ -23,10 +23,10 @@ struct DatasetConfig {
     string data_path;
 };
 
-const int NUM_QUERIES = 30; // 增加样本数以获得更准确的平均值
-const int FIXED_K = 1;
+const int NUM_QUERIES = 50; // 增加样本数以获得更准确的平均值
+const int FIXED_K = 3;
 // const vector<int> N_VALUES = {1024, 2048}; 
-const vector<int> N_VALUES = {1024};
+const vector<int> N_VALUES = {1024, 32768};
 // 定义四个数据集
 vector<DatasetConfig> datasets = {
     {"yelp",       "../../dataset/yelp/keywords_dict.txt",       "../../dataset/yelp/dataset.txt"},
@@ -43,6 +43,7 @@ int main() {
     std::random_device rd;
     std::mt19937 gen(rd());
 
+    #pragma omp parallel for
     for (const auto& ds : datasets) {
         cout << "\n>>> test dataset: " << ds.name << " (BlockSize=" << BlockSize << ")" << endl;
         

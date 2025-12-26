@@ -6,10 +6,7 @@
 
 CuckooTable::CuckooTable(size_t initial_size, int HOTREE_level) : current_count(0) {
     HOTREE_level_ = HOTREE_level;
-    if (initial_size < 4) initial_size = 4;
-    size_t power_of_2 = 1;
-    while(power_of_2 < initial_size) power_of_2 *= 2;
-    table.resize(power_of_2);
+    table.resize(initial_size);
     
     stash.reserve(STASH_CAPACITY);
 }
@@ -34,46 +31,21 @@ std::vector<Branch*> CuckooTable::find_hotree(uint64_t id, size_t place1, size_t
     return result;
 }
 
-Branch* CuckooTable::find(uint64_t id_and_counter, Client* client) {
-    uint64_t id = id_and_counter>>32;
+Branch* CuckooTable::find(uint64_t id, uint64_t counter_for_lastest_data, Client* client) {
+    uint64_t id_and_counter = combine_unique(id, counter_for_lastest_data);
     // 1. Table Lookups
     size_t p1 = client->compute_hash1(id_and_counter, HOTREE_level_, table.size());
-    if (table[p1].occupied && table[p1].branch != nullptr && table[p1].branch->id == id) {
+    if (table[p1].occupied && table[p1].branch != nullptr && table[p1].branch->id == id && table[p1].branch->counter_for_lastest_data == counter_for_lastest_data) {
         return table[p1].branch;
     }
     size_t p2 = client->compute_hash2(id_and_counter, HOTREE_level_, table.size());
-    if (table[p2].occupied && table[p2].branch != nullptr && table[p2].branch->id == id) {
+    if (table[p2].occupied && table[p2].branch != nullptr && table[p2].branch->id == id && table[p2].branch->counter_for_lastest_data == counter_for_lastest_data) {
         return table[p2].branch;
     }
 
     // 2. Stash Lookup
     for (auto& item : stash) {
-        if (item != nullptr && item->id == id) return item;
-    }
-    return nullptr;
-}
-
-Branch* CuckooTable::find_remove(uint64_t id, Client* client) {
-    client->communication_round_trip_++;
-    client->communication_volume_ += 2 * BlockSize;
-    
-    size_t p1 = client->compute_hash1(id, HOTREE_level_, table.size());
-    if (table[p1].occupied && table[p1].branch != nullptr && table[p1].branch->id == id) {
-        // 解密并重新加密模拟“逻辑移除”
-        table[p1].branch->trueData = client->cryptor_->aes_decrypt(table[p1].branch->trueData, HOTREE_level_);
-        table[p1].branch->trueData = client->cryptor_->aes_encrypt(table[p1].branch->trueData, HOTREE_level_);
-        return table[p1].branch;
-    }
-    
-    size_t p2 = client->compute_hash2(id, HOTREE_level_, table.size());
-    if (table[p2].occupied && table[p2].branch != nullptr && table[p2].branch->id == id) {
-        table[p2].branch->trueData = client->cryptor_->aes_decrypt(table[p2].branch->trueData, HOTREE_level_);
-        table[p2].branch->trueData = client->cryptor_->aes_encrypt(table[p2].branch->trueData, HOTREE_level_);
-        return table[p2].branch;
-    }
-
-    for (auto& item : stash) {
-        if (item != nullptr && item->id == id) return item;
+        if (item != nullptr && item->id == id && item->counter_for_lastest_data == counter_for_lastest_data) return item;
     }
     return nullptr;
 }
@@ -87,7 +59,7 @@ void CuckooTable::insert(Branch* branch, Client* client) {
 
 void CuckooTable::insert_internal(Branch* item, Client* client) {
     // 检查是否已存在（避免重复插入指针）
-    if (find(combine_unique(item->id, item->counter_for_lastest_data), client) != nullptr) {
+    if (find(item->id, item->counter_for_lastest_data, client) != nullptr) {
         return; 
     }
 
@@ -116,10 +88,10 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
     }
     size_t p1 = client->compute_hash1(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
     size_t p2 = client->compute_hash2(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
-    if(table[p1].branch->id == debug_id) {
+    if(table[p1].branch!=nullptr && table[p1].branch->id == debug_id) {
         std::cout<<"In insert id "<< table[p1].branch->id <<" level "<<HOTREE_level_ <<" p1: "<<p1 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< table[p1].branch->counter_for_lastest_data<<std::endl;    
     }
-    if(table[p2].branch->id == debug_id) {
+    if(table[p2].branch!=nullptr && table[p2].branch->id == debug_id) {
         std::cout<<"In insert id "<< table[p2].branch->id <<" level "<<HOTREE_level_ <<" p2: "<<p2 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< table[p2].branch->counter_for_lastest_data<<std::endl;    
     }
 
@@ -156,18 +128,60 @@ void CuckooTable::rehash(size_t new_size, Client* client) {
 }
 
 void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_elements, std::vector<int> branchs_level_belong_to, Client* client) {
-    table.assign(pow(2,HOTREE_level_), Entry());
+    table.assign(pow(2, HOTREE_level_), Entry());
     stash.clear();
     current_count = 0;
     client->UpdateSeed(HOTREE_level_);
-    for(auto &elem : all_elements) {
-        if(elem->id == debug_id) {
-            printf("id %d exist with counter %d in OHT.cpp\n", elem->id, elem->counter_for_lastest_data);
+
+    /*--------------------------------oblivous tight compaction-----------------------------------*/
+    // 1. 使用 map 进行去重，保留 counter 最大的元素
+    // key: id, value: Branch*
+    if(HOTREE_level_ == client->max_level_) {
+        std::unordered_map<int, Branch*> unique_elements;
+        for (auto& elem : all_elements) {
+            if (elem == nullptr) continue;
+
+            int id = elem->id;
+            // 如果 id 不存在，或者当前元素的 counter 更大，则更新/插入
+            if (unique_elements.find(id) == unique_elements.end() || 
+                elem->counter_for_lastest_data > unique_elements[id]->counter_for_lastest_data) {
+                unique_elements[id] = elem;
+            }
         }
-        insert(elem, client);
-        // printf("insert id %d in level %d with table size counter %d\n", elem->id, HOTREE_level_, current_count);
+
+        // 2. 遍历去重后的结果并执行插入
+        for (auto const& [id, elem] : unique_elements) {
+            if (id == debug_id) {
+                printf("Inserting unique id %d with max counter %d in OHT.cpp\n", 
+                    elem->id, elem->counter_for_lastest_data);
+            }
+            elem->level = HOTREE_level_;
+            elem->counter_for_lastest_data = 0;
+            for(auto & triple : elem->child_triple) {
+                triple->counter_for_lastest_data = 0;
+                triple->level = HOTREE_level_;
+            }
+            insert(elem, client);
+        }
+
+        return;
     }
-    return ;
+    else {
+        table.assign(pow(2,HOTREE_level_), Entry());
+        stash.clear();
+        current_count = 0;
+        client->UpdateSeed(HOTREE_level_);
+        for(auto &elem : all_elements) {
+            if(elem->id == debug_id) {
+                printf("id %d exist with counter %d in OHT.cpp\n", elem->id, elem->counter_for_lastest_data);
+            }
+            insert(elem, client);
+            // printf("insert id %d in level %d with table size counter %d\n", elem->id, HOTREE_level_, current_count);
+        }
+        return ; 
+    }
+    // ... 后续被注释掉的 oblivious shuffle 代码 ...
+
     int N_real = all_elements.size();
     int B;
     if(N_real > Z) B = pow(2, ceil(log2(2.0 * N_real / Z)));

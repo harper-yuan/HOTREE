@@ -17,15 +17,25 @@
 #include <omp.h>
 
 // --- 1. 配置参数 ---
-constexpr const int MAX_SIZE = 6;        // 节点最大容量 (分支数)
+constexpr const int MAX_SIZE = 4;        // 节点最大容量 (分支数)
 constexpr const double ALPHA = 0.5;      // 权重因子：0.5 表示空间和文本同等重要
-constexpr const int Z = 4;            // Client stash size
+constexpr const int Z = 128;            // Client stash size
 constexpr const size_t cuckoo_stash_size = 20;
 constexpr const size_t BlockSize = 4096; // padding every encrypted data to 4096 Bytes
 constexpr const int num_threads = 16; 
 constexpr const int debug_id = 20;
 constexpr const int child_debug_id = -18;
 constexpr const int global_seed = 200;
+
+// constexpr const int MAX_SIZE = 4;        // 节点最大容量 (分支数)
+// constexpr const double ALPHA = 0.5;      // 权重因子：0.5 表示空间和文本同等重要
+// constexpr const int Z = 128;            // Client stash size
+// constexpr const size_t cuckoo_stash_size = 20;
+// constexpr const size_t BlockSize = 4096; // padding every encrypted data to 4096 Bytes
+// constexpr const int num_threads = 16; 
+// constexpr const int debug_id = 20;
+// constexpr const int child_debug_id = 10000000;
+// constexpr const int global_seed = 200;
 
 // --- 2. 数据结构定义 ---
 struct DataRecord {
