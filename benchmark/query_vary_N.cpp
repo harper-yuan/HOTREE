@@ -24,9 +24,9 @@ struct DatasetConfig {
 };
 
 const int NUM_QUERIES = 50; // 增加样本数以获得更准确的平均值
-const int FIXED_K = 3;
+const int FIXED_K = 1;
 // const vector<int> N_VALUES = {1024, 2048}; 
-const vector<int> N_VALUES = {1024, 32768};
+const vector<int> N_VALUES = {1024, 1024*2, 1024*4, 1024*8, 1024*16};
 // 定义四个数据集
 vector<DatasetConfig> datasets = {
     {"yelp",       "../../dataset/yelp/keywords_dict.txt",       "../../dataset/yelp/dataset.txt"},
@@ -38,12 +38,12 @@ int main() {
     string result_filename = "../exp_result/query_vary_N.csv";
     
     ofstream csv(result_filename);
-    csv << "Dataset,N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize\n";
+    csv << "Dataset,N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize,Access,Self_Access\n";
 
     std::random_device rd;
     std::mt19937 gen(rd());
 
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for (const auto& ds : datasets) {
         cout << "\n>>> test dataset: " << ds.name << " (BlockSize=" << BlockSize << ")" << endl;
         
@@ -66,16 +66,26 @@ int main() {
             client = hotree.getClient();
 
             // 4. 从当前数据中随机选取查询
-            vector<DataRecord> sampled_queries = readDataFromDataset(ds.data_path, NUM_QUERIES);
+            vector<DataRecord> sampled_queries;
+            if(ds.name == "synthetic") {
+                sampled_queries = readDataFromDataset("../../dataset/synthetic/query.txt", NUM_QUERIES);
+            }
+            else {
+                sampled_queries = readDataFromDataset(ds.data_path, NUM_QUERIES);
+            }
             std::shuffle(sampled_queries.begin(), sampled_queries.end(), gen);
 
             double total_time = 0;
             long long total_rounds = 0;
             long long total_volume = 0;
+            long long total_counter_access =  0;
+            long long total_counter_self_healing_acces = 0;
             int actual_queries = min((int)sampled_queries.size(), NUM_QUERIES);
 
             int start_rounds = client->communication_round_trip_;
             int start_volume = client->communication_volume_;
+            int start_counter_access_ = client->counter_access_;
+            int start_counter_self_healing_access = client->counter_self_healing_access_;
             for (int i = 0; i < actual_queries; ++i) {
                 const auto& q = sampled_queries[i];
 
@@ -87,13 +97,17 @@ int main() {
             }
             total_rounds += (client->communication_round_trip_ - start_rounds);
             total_volume += (client->communication_volume_ - start_volume);
+            total_counter_access += (client->counter_access_ - start_counter_access_);
+            total_counter_self_healing_acces += (client->counter_self_healing_access_ - start_counter_self_healing_access);
 
             double avg_t = total_time / actual_queries;
             double avg_r = (double)total_rounds / actual_queries;
             double avg_v = (double)total_volume / actual_queries;
+            double avg_a = (double)total_counter_access / actual_queries;
+            double avg_as = (double)total_counter_self_healing_acces / actual_queries;
 
             // 写入 CSV: Dataset, N, K, Time, Rounds, Volume, BlockSize
-            csv << ds.name << "," << n << "," << FIXED_K << "," << avg_t << "," << avg_r << "," << avg_v << "," << BlockSize << "\n";
+            csv << ds.name << "," << n << "," << FIXED_K << "," << avg_t << "," << avg_r << "," << avg_v << "," << BlockSize<< "," << avg_a<< "," << avg_as << "\n";
             
             cout << "  [N=" << setw(5) << n << "] Time: " << fixed << setprecision(2) << avg_t 
                  << "ms | Rounds: " << avg_r << " | Vol: " << (long)avg_v << " Bytes" << endl;

@@ -4,6 +4,8 @@
 // Client::Client(int L): gen(rd()), dis(0, 0xFFFFFFFF) {
 Client::Client(int L): gen(global_seed), dis(0, 0xFFFFFFFF) {
     cryptor_ = new Cryptor(L);
+    counter_access_ = 0;
+    counter_self_healing_access_ = 0;
     communication_volume_ = 0;
     communication_round_trip_ = 0;
     stash_.reserve(Z); 

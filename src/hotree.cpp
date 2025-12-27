@@ -104,7 +104,9 @@ void HOTree::Eviction(Client* client) {
     vector<Branch*> all_shuffled_branchs;
     vector<int> branchs_level_belong_to;
     int target_level = client_->get_first_empty_level();
-    cout<<"---------------------------------------start shuffle---------------------------------------\n";
+    if(if_is_debug) {
+        cout<<"---------------------------------------start shuffle---------------------------------------\n";
+    }
 
     /*-------------------------Move data of cuckoo hash tables to a vector-------------------------------*/
     for(int level_i = client_->min_level_; level_i < target_level; level_i++) {
@@ -129,7 +131,9 @@ void HOTree::Eviction(Client* client) {
             // if data have removed, clear hash table
             client->vec_hotree_level_i_is_empty_[level_i] = true; // level_i will be empty
             client_->vector_every_level_stash_[level_i].clear();
-            cout<<"level "<<level_i<<" is no empty"<<endl;
+            if(if_is_debug) {
+                cout<<"level "<<level_i<<" is no empty"<<endl;
+            }
         }
     }
     // if it is the greatest level, merge it and upper levels 
@@ -162,7 +166,7 @@ void HOTree::Eviction(Client* client) {
     for (auto const& [id, elem] : client->stash_) {
         elem->trueData = client->cryptor_->aes_encrypt(elem->trueData, target_level);
         elem->level = target_level;
-        if(elem->id == debug_id) {
+        if(elem->id == debug_id && if_is_debug) {
             printf("id {%d} is in stash with counter {%d} \n", elem->id, elem->counter_for_lastest_data);
         }
         all_shuffled_branchs.push_back(elem);
@@ -177,7 +181,7 @@ void HOTree::Eviction(Client* client) {
                 triple->level = target_level;
             }
         }
-        if(branch->id == debug_id) {
+        if(branch->id == debug_id && if_is_debug) {
             printf("id %d exist with counter %d in hotree.cpp\n", branch->id, branch->counter_for_lastest_data);
         }
     }
@@ -200,8 +204,10 @@ void HOTree::Eviction(Client* client) {
             vec_hashtable_[level_i]->print_table_status(temp,client_->vector_every_level_stash_[level_i]);
         }
     }
-    cout<< all_shuffled_branchs.size() <<" data is shuffled and moved to level: "<<target_level<<endl;
-    cout<<"---------------------------------------end shuffle---------------------------------------\n";
+    if(if_is_debug) {
+        cout<< all_shuffled_branchs.size() <<" data is shuffled and moved to level: "<<target_level<<endl;
+        cout<<"---------------------------------------end shuffle---------------------------------------\n";
+    }
 }
 
 //access some level with exactly level_i and access other levels with dummy
@@ -210,7 +216,7 @@ Branch* HOTree::Access(uint64_t id, int counter_for_lastest_data, int level_i) {
     Branch* result_branch = nullptr;
     
     client_->communication_round_trip_ += 0.5; // only one trip
-
+    client_->counter_access_ += 1;
     // access every level if the client stash have not found target id data
     for(int i = client_->min_level_; i < client_->vec_hotree_level_i_is_empty_.size(); i++) {
         if(client_->vec_hotree_level_i_is_empty_[i]) {
@@ -221,7 +227,7 @@ Branch* HOTree::Access(uint64_t id, int counter_for_lastest_data, int level_i) {
                 size_t p1 = client_->compute_hash1(id_counter_combine, i, vec_hashtable_[i]->getTableCapacity());
                 size_t p2 = client_->compute_hash2(id_counter_combine, i, vec_hashtable_[i]->getTableCapacity());
 
-                if(id == debug_id) {
+                if(id == debug_id && if_is_debug) {
                     std::cout<<"In search level"<< level_i <<" p1: "<<p1 << " seed: "<<client_->vec_seed1_[level_i]<<" table size"<< vec_hashtable_[i]->getTableCapacity()<<std::endl;
                 }
 
@@ -249,6 +255,7 @@ Branch* HOTree::Access(uint64_t id, int counter_for_lastest_data, int level_i) {
 Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data) {
     Branch* result_branch = nullptr;
     client_->communication_round_trip_ += 0.5; // only half trip, no need to put back
+    client_->counter_self_healing_access_ += 1;
 
     /*--------------------------------find the data using standard Hierarchical ORAM, compute index using real id untill found---------------------*/
     for(int i = client_->min_level_; i < client_->vec_hotree_level_i_is_empty_.size(); i++) {
@@ -281,7 +288,7 @@ Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data) {
                 size_t p1 = client_->compute_hash1(combine_unique(id, counter_for_lastest_data), i, vec_hashtable_[i]->getTableCapacity());
                 size_t p2 = client_->compute_hash2(combine_unique(id, counter_for_lastest_data), i, vec_hashtable_[i]->getTableCapacity());
 
-                if(id == debug_id) {
+                if(id == debug_id && if_is_debug) {
                     std::cout<<"In self heal search level"<< i <<" p1: "<<p1 << " seed: "<<client_->vec_seed1_[i]<<" table size"<< vec_hashtable_[i]->getTableCapacity()<<std::endl;
                 }
                 auto vec_temp_branch = vec_hashtable_[i]->find_hotree(id, p1, p2);
@@ -311,7 +318,10 @@ Branch* HOTree::Retrieve(Client* client_, Triple*& triple) {
     // 将要取回的id和该id所在的层的预测
     int level_i = triple->level;
     int id = triple->id;
-    cout<<"We will retrieve id: "<<id<<endl;
+    if(if_is_debug) {
+        cout<<"We will retrieve id: "<<id<<endl;
+    }
+    
     int counter_for_lastest_data = triple->counter_for_lastest_data;
     
     /*----------------------------------Find data in Client-----------------------------------------*/
@@ -352,12 +362,12 @@ Branch* HOTree::Retrieve(Client* client_, Triple*& triple) {
     child_branch->level = -1;
     client_->stash_[id] = child_branch; // move the data to stash
     triple->level = client_->get_first_empty_level();
-    if(id == debug_id) {
+    if(id == debug_id && if_is_debug) {
         cout<<"id "<< id <<" counter before updating: "<< child_branch->counter_for_lastest_data <<endl;
     }
     triple->counter_for_lastest_data++;
     child_branch->counter_for_lastest_data = triple->counter_for_lastest_data;
-    if(id == debug_id) {
+    if(id == debug_id && if_is_debug) {
         cout<<"id "<< id <<" counter have update: "<< child_branch->counter_for_lastest_data <<endl;
     }
     return child_branch;
@@ -365,77 +375,176 @@ Branch* HOTree::Retrieve(Client* client_, Triple*& triple) {
 
 vector<pair<double, DataRecord>> HOTree::SearchTopK(double qx, double qy, string qText, int k, Client* client) {
     vector<pair<double, DataRecord>> results;
-    if (root.size() == 0 || k <= 0) return results;
+    if (root.empty() || k <= 0) return results;
 
-    // 1. 构建查询节点
+    // 1. 构建查询节点 (手动 new，需 delete)
     Branch* queryBranch = new Branch();
     queryBranch->m_rect.min_Rec[0] = queryBranch->m_rect.max_Rec[0] = qx;
     queryBranch->m_rect.min_Rec[1] = queryBranch->m_rect.max_Rec[1] = qy;
     queryBranch->CalcuKeyWordWeight(qText, dic_str);
     queryBranch->level = -1;
 
-    // 2. 使用 priority_queue 替代 vector+sort
+    // 2. 优先队列 (最大堆)
     priority_queue<SearchItem> pq;
+
+    // 3. 动态剪枝阈值
     double min_score = -1.0; 
 
-    // 3. 初始层入队
+    // 4. 初始化：将根节点的所有子项加入队列
     for (auto & triple : root) {
-        // 确定triple->id是要取的，那么先取回，然后更新triple
-        auto child_branch = Retrieve(client_, triple); //更新操作已经在Retrieve()里做了
-        
+        // Retrieve 返回 client_->stash_ 管理的指针
+        auto child_branch = Retrieve(client_, triple);
+        if (!child_branch) continue;
+
         double score = client_->CalcuTestSPaceRele(child_branch, queryBranch);
+        
+        // 初始入队
         pq.push({score, child_branch});
-        // if the client memory is full, it will be removed to the first empty level in HOTree
+
+        // ORAM 内存检查
         if(client_->stash_.size() % Z == 0 && client_->stash_.size() != 0) {
             Eviction(client_);
         }
     }
-    
-    // 4. 循环搜索
-    while (!pq.empty() && results.size() < k) {
-        SearchItem top = pq.top();
-        pq.pop(); // O(log N) 操作，比 erase 高效得多
 
-        // 【核心剪枝 1：出队截断】
-        // 如果当前最大的分数已经小于当前的门槛分数，说明后面所有的节点都不可能入选
+    // 5. 循环搜索 (Best-First Search)
+    while (!pq.empty()) {
+        SearchItem top = pq.top();
+        pq.pop();
+
+        // 【优化终止条件】
+        // 如果我们已经找到了 k 个结果，且当前队列中最好的分数
+        // 都不如结果集中最差的分数，那么剩下的更没希望，直接结束。
         if (results.size() >= k && top.score < min_score) {
-            break; // 直接终止 while 循环，不需要清理 pq，因为后续元素只会更小
+            break; // 使用 break 而不是 continue，直接跳出 while
         }
 
         Branch* curr = top.branch;
 
-        // 【关键逻辑】检查是否已经到达叶子节点
-        if (curr->id >= 0) { // id < 0 represents non-leaf branch
-            results.push_back(make_pair(top.score, id_to_record_vec[curr->id]));
-            if (results.size() >= k) {
-                min_score = results.back().first;
+        // 判断节点类型
+        if (curr->id >= 0) { 
+            // --- 叶子节点 (Data Document) ---
+            if (curr->id < id_to_record_vec.size()) {
+                results.push_back(make_pair(top.score, id_to_record_vec[curr->id]));
+                
+                // 维护 Top-K 结果集
+                sort(results.begin(), results.end(), [](const pair<double, DataRecord>& a, const pair<double, DataRecord>& b) {
+                    return a.first > b.first; 
+                });
+                
+                if (results.size() > k) {
+                    results.pop_back(); // 移除第 K+1 个
+                }
+                
+                // 更新阈值
+                if (results.size() == k) {
+                    min_score = results.back().first;
+                }
             }
-        } else {
-            // 是中间节点：展开子节点
+        } 
+        else {
+            // --- 中间节点 (Index Node) ---
             vector<Triple*> vec_child_triples = curr->child_triple;
-            if (vec_child_triples.size() > 0) {
-                for (auto* triple : vec_child_triples) {
-                    // It is for true, triple.id will be accessed. So we change its level in advance
-                    
-                    if(curr->level > triple->level) {
-                        printf("curr id %d (in level %d) have child id %d in level %d \n", curr->id, curr->level, triple->id, triple->level);
-                    }
-                    auto child_branch = Retrieve(client_, triple);
+            
+            for (auto* triple : vec_child_triples) {
+                auto child_branch = Retrieve(client_, triple);
+                if (!child_branch) continue;
 
-                    double score = client_->CalcuTestSPaceRele(child_branch, queryBranch);
-                    pq.push({score, child_branch});
+                double child_score = client_->CalcuTestSPaceRele(child_branch, queryBranch);
 
-                    // if the client memory is full, it will be removed to the first empty level in HOTree
-                    if(client_->stash_.size() % Z == 0 && client_->stash_.size() != 0) {
-                        Eviction(client_); 
-                    }
+                // 【剪枝】入队前检查
+                // 如果已有 k 个结果且子节点分数低于阈值，则不入队
+                if (results.size() >= k && child_score < min_score) {
+                    // Do nothing (implicitly pruned)
+                } else {
+                    pq.push({child_score, child_branch});
+                }
+
+                // ORAM Eviction
+                if(client_->stash_.size() % Z == 0 && client_->stash_.size() != 0) {
+                    Eviction(client_); 
                 }
             }
         }
     }
+
     delete queryBranch;
     return results;
 }
+
+// vector<pair<double, DataRecord>> HOTree::SearchTopK(double qx, double qy, string qText, int k, Client* client) {
+//     vector<pair<double, DataRecord>> results;
+//     if (root.size() == 0 || k <= 0) return results;
+
+//     // 1. 构建查询节点
+//     Branch* queryBranch = new Branch();
+//     queryBranch->m_rect.min_Rec[0] = queryBranch->m_rect.max_Rec[0] = qx;
+//     queryBranch->m_rect.min_Rec[1] = queryBranch->m_rect.max_Rec[1] = qy;
+//     queryBranch->CalcuKeyWordWeight(qText, dic_str);
+//     queryBranch->level = -1;
+
+//     // 2. 使用 priority_queue 替代 vector+sort
+//     priority_queue<SearchItem> pq;
+//     double min_score = -1.0; 
+
+//     // 3. 初始层入队
+//     for (auto & triple : root) {
+//         // 确定triple->id是要取的，那么先取回，然后更新triple
+//         auto child_branch = Retrieve(client_, triple); //更新操作已经在Retrieve()里做了
+        
+//         double score = client_->CalcuTestSPaceRele(child_branch, queryBranch);
+//         pq.push({score, child_branch});
+//         // if the client memory is full, it will be removed to the first empty level in HOTree
+//         if(client_->stash_.size() % Z == 0 && client_->stash_.size() != 0) {
+//             Eviction(client_);
+//         }
+//     }
+    
+//     // 4. 循环搜索
+//     while (!pq.empty() && results.size() < k) {
+//         SearchItem top = pq.top();
+//         pq.pop(); // O(log N) 操作，比 erase 高效得多
+
+//         // 【核心剪枝 1：出队截断】
+//         // 如果当前最大的分数已经小于当前的门槛分数，说明后面所有的节点都不可能入选
+//         if (results.size() >= k && top.score < min_score) {
+//             break; // 直接终止 while 循环，不需要清理 pq，因为后续元素只会更小
+//         }
+
+//         Branch* curr = top.branch;
+
+//         // 【关键逻辑】检查是否已经到达叶子节点
+//         if (curr->id >= 0) { // id < 0 represents non-leaf branch
+//             results.push_back(make_pair(top.score, id_to_record_vec[curr->id]));
+//             if (results.size() >= k) {
+//                 min_score = results.back().first;
+//             }
+//         } else {
+//             // 是中间节点：展开子节点
+//             vector<Triple*> vec_child_triples = curr->child_triple;
+//             if (vec_child_triples.size() > 0) {
+//                 for (auto* triple : vec_child_triples) {
+//                     // It is for true, triple.id will be accessed. So we change its level in advance
+                    
+//                     if(curr->level > triple->level) {
+//                         printf("curr id %d (in level %d) have child id %d in level %d \n", curr->id, curr->level, triple->id, triple->level);
+//                     }
+//                     auto child_branch = Retrieve(client_, triple);
+
+//                     double score = client_->CalcuTestSPaceRele(child_branch, queryBranch);
+//                     pq.push({score, child_branch});
+
+//                     // if the client memory is full, it will be removed to the first empty level in HOTree
+//                     if(client_->stash_.size() % Z == 0 && client_->stash_.size() != 0) {
+//                         Eviction(client_); 
+//                     }
+//                 }
+//             }
+//         }
+//     }
+//     delete queryBranch;
+//     return results;
+// }
 
 void HOTree::Build(vector<DataRecord>& raw_data, Client* &client) {
     // initial Client parameters using stash size Z and size of dataset N
@@ -489,7 +598,7 @@ void HOTree::Build(vector<DataRecord>& raw_data, Client* &client) {
         }
 
         Branch* parent_branch = new Branch();
-        if(non_leaf_branch_id == -229) {
+        if(non_leaf_branch_id == -229 && if_is_debug) {
             cout<<"1";
         }
         parent_branch->id = non_leaf_branch_id--;
@@ -515,9 +624,6 @@ void HOTree::Build(vector<DataRecord>& raw_data, Client* &client) {
         while (branch_idx < Branchs_at_IR_tree.size()) {
             Branch* parent = new Branch(); //一个节点存MAX_SIZE个branch
             parent->initRectangle();
-            if(non_leaf_branch_id == -229) {
-                cout<<"1";
-            }
             parent->id = non_leaf_branch_id--;
             int pack_count = 0;
 

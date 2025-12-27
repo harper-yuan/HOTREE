@@ -88,16 +88,18 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
     }
     size_t p1 = client->compute_hash1(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
     size_t p2 = client->compute_hash2(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
-    if(table[p1].branch!=nullptr && table[p1].branch->id == debug_id) {
-        std::cout<<"In insert id "<< table[p1].branch->id <<" level "<<HOTREE_level_ <<" p1: "<<p1 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< table[p1].branch->counter_for_lastest_data<<std::endl;    
-    }
-    if(table[p2].branch!=nullptr && table[p2].branch->id == debug_id) {
-        std::cout<<"In insert id "<< table[p2].branch->id <<" level "<<HOTREE_level_ <<" p2: "<<p2 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< table[p2].branch->counter_for_lastest_data<<std::endl;    
+    if(if_is_debug) {
+        if(table[p1].branch!=nullptr && table[p1].branch->id == debug_id) {
+            std::cout<<"In insert id "<< table[p1].branch->id <<" level "<<HOTREE_level_ <<" p1: "<<p1 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< table[p1].branch->counter_for_lastest_data<<std::endl;    
+        }
+        if(table[p2].branch!=nullptr && table[p2].branch->id == debug_id) {
+            std::cout<<"In insert id "<< table[p2].branch->id <<" level "<<HOTREE_level_ <<" p2: "<<p2 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< table[p2].branch->counter_for_lastest_data<<std::endl;    
+        }
     }
 
     if (stash.size() < STASH_CAPACITY) {
         stash.push_back(item);
-        if(item->id == debug_id) {
+        if(item->id == debug_id && if_is_debug) {
             std::cout<<"In insert id "<< item->id <<" level "<<HOTREE_level_ <<" stash weth seed"<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< item->counter_for_lastest_data<<std::endl;
         }
         return; 
@@ -151,7 +153,7 @@ void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_element
 
         // 2. 遍历去重后的结果并执行插入
         for (auto const& [id, elem] : unique_elements) {
-            if (id == debug_id) {
+            if (id == debug_id && if_is_debug) {
                 printf("Inserting unique id %d with max counter %d in OHT.cpp\n", 
                     elem->id, elem->counter_for_lastest_data);
             }
@@ -172,7 +174,7 @@ void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_element
         current_count = 0;
         client->UpdateSeed(HOTREE_level_);
         for(auto &elem : all_elements) {
-            if(elem->id == debug_id) {
+            if(elem->id == debug_id && if_is_debug) {
                 printf("id %d exist with counter %d in OHT.cpp\n", elem->id, elem->counter_for_lastest_data);
             }
             insert(elem, client);

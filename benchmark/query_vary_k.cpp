@@ -21,7 +21,7 @@ struct DatasetConfig {
     string data_path;
 };
 
-const int NUM_QUERIES = 2;
+const int NUM_QUERIES = 50;
 const int FIXED_N = 1024; // 固定数据规模
 const vector<int> K_VALUES = {1, 3, 5, 7};
 vector<DatasetConfig> datasets = {
@@ -32,14 +32,13 @@ vector<DatasetConfig> datasets = {
 };
 int main() {
     string result_filename = "../exp_result/query_vary_K.csv";
-    
-
     ofstream csv(result_filename);
-    csv << "Dataset,N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize\n";
+    csv << "Dataset,N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize,Access,Self_Access\n";
 
     std::random_device rd;
     std::mt19937 gen(rd());
 
+    #pragma omp parallel for
     for (const auto& ds : datasets) {
         cout << "\n>>> 正在测试数据集 (K变动): " << ds.name << endl;
         
@@ -61,11 +60,15 @@ int main() {
             double total_time = 0;
             long long total_rounds = 0;
             long long total_volume = 0;
+            long long total_counter_access =  0;
+            long long total_counter_self_healing_acces = 0;
 
             for (int i = 0; i < NUM_QUERIES; ++i) {
                 const auto& q = sampled_queries[i];
                 int start_rounds = client->communication_round_trip_;
                 int start_volume = client->communication_volume_;
+                int start_counter_access_ = client->counter_access_;
+                int start_counter_self_healing_access = client->counter_self_healing_access_;
 
                 auto start_t = high_resolution_clock::now();
                 hotree.SearchTopK(q.x_coord, q.y_coord, q.processed_text, k, client);
@@ -74,13 +77,17 @@ int main() {
                 total_time += duration_cast<microseconds>(end_t - start_t).count() / 1000.0;
                 total_rounds += (client->communication_round_trip_ - start_rounds);
                 total_volume += (client->communication_volume_ - start_volume);
+                total_counter_access += (client->counter_access_ - start_counter_access_);
+                total_counter_self_healing_acces += (client->counter_self_healing_access_ - start_counter_self_healing_access);
             }
 
             double avg_t = total_time / NUM_QUERIES;
             double avg_r = (double)total_rounds / NUM_QUERIES;
             double avg_v = (double)total_volume / NUM_QUERIES;
+            double avg_a = (double)total_counter_access / NUM_QUERIES;
+            double avg_as = (double)total_counter_self_healing_acces / NUM_QUERIES;
 
-            csv << ds.name << "," << FIXED_N << "," << k << "," << avg_t << "," << avg_r << "," << avg_v << "," << BlockSize << "\n";
+            csv << ds.name << "," << FIXED_N << "," << k << "," << avg_t << "," << avg_r << "," << avg_v << "," << BlockSize <<  "," << avg_a<< "," << avg_as << "\n";
             cout << "  [K=" << setw(2) << k << "] Time: " << fixed << setprecision(2) << avg_t << "ms" << endl;
         }
     }

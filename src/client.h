@@ -19,6 +19,8 @@ public:
     size_t seed_shuffle_;
     double communication_round_trip_;
     double communication_volume_;
+    int counter_access_;
+    int counter_self_healing_access_;
     
     std::random_device rd;          // 随机设备
     std::mt19937 gen;               // 随机数生成引擎
