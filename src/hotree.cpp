@@ -373,103 +373,284 @@ Branch* HOTree::Retrieve(Client* client_, Triple*& triple) {
     return child_branch;
 }
 
+// 定义一个新的搜索项结构体，用于优先队列
+struct LazySearchItem {
+    double score;
+    Triple* triple_info; // 存储要去哪里取数据
+    Branch* fetched_branch; // 如果已经取回来了（比如根节点），存这里；否则为 nullptr
+
+    // 优先队列需要重载 < 运算符 (大顶堆，分数小的在下，但通常我们要TopK大的，或者根据距离小的)
+    // 假设是相似度越高越好
+    bool operator<(const LazySearchItem& other) const {
+        return score < other.score; 
+    }
+};
+
 vector<pair<double, DataRecord>> HOTree::SearchTopK(double qx, double qy, string qText, int k, Client* client) {
     vector<pair<double, DataRecord>> results;
-    if (root.empty() || k <= 0) return results;
+    if (root.size() == 0 || k <= 0) return results;
 
-    // 1. 构建查询节点 (手动 new，需 delete)
+    // 1. 构建查询节点
     Branch* queryBranch = new Branch();
     queryBranch->m_rect.min_Rec[0] = queryBranch->m_rect.max_Rec[0] = qx;
     queryBranch->m_rect.min_Rec[1] = queryBranch->m_rect.max_Rec[1] = qy;
     queryBranch->CalcuKeyWordWeight(qText, dic_str);
     queryBranch->level = -1;
 
-    // 2. 优先队列 (最大堆)
-    priority_queue<SearchItem> pq;
-
-    // 3. 动态剪枝阈值
+    priority_queue<LazySearchItem> pq;
     double min_score = -1.0; 
 
-    // 4. 初始化：将根节点的所有子项加入队列
+    // 2. 初始层入队
+    // 因为我们在 Build 里已经强制合并为单根(或少根)，这里 Retrieve 次数很少
     for (auto & triple : root) {
-        // Retrieve 返回 client_->stash_ 管理的指针
-        auto child_branch = Retrieve(client_, triple);
-        if (!child_branch) continue;
-
+        // 根节点必须取回，无法避免
+        auto child_branch = Retrieve(client_, triple); 
+        
+        // 计算根节点的分数
         double score = client_->CalcuTestSPaceRele(child_branch, queryBranch);
         
-        // 初始入队
-        pq.push({score, child_branch});
-
-        // ORAM 内存检查
+        // 根节点已经取回了，放入 fetched_branch
+        pq.push({score, triple, child_branch}); 
+        
+        // Eviction 检查
         if(client_->stash_.size() % Z == 0 && client_->stash_.size() != 0) {
             Eviction(client_);
         }
     }
+    
+    // 3. 循环搜索
+    while (!pq.empty() && results.size() < k) {
+        LazySearchItem top = pq.top();
+        pq.pop(); 
 
-    // 5. 循环搜索 (Best-First Search)
-    while (!pq.empty()) {
-        SearchItem top = pq.top();
-        pq.pop();
-
-        // 【优化终止条件】
-        // 如果我们已经找到了 k 个结果，且当前队列中最好的分数
-        // 都不如结果集中最差的分数，那么剩下的更没希望，直接结束。
+        // 剪枝
         if (results.size() >= k && top.score < min_score) {
-            break; // 使用 break 而不是 continue，直接跳出 while
+            break; 
         }
 
-        Branch* curr = top.branch;
+        Branch* curr = top.fetched_branch;
 
-        // 判断节点类型
-        if (curr->id >= 0) { 
-            // --- 叶子节点 (Data Document) ---
-            if (curr->id < id_to_record_vec.size()) {
-                results.push_back(make_pair(top.score, id_to_record_vec[curr->id]));
-                
-                // 维护 Top-K 结果集
-                sort(results.begin(), results.end(), [](const pair<double, DataRecord>& a, const pair<double, DataRecord>& b) {
-                    return a.first > b.first; 
-                });
-                
-                if (results.size() > k) {
-                    results.pop_back(); // 移除第 K+1 个
-                }
-                
-                // 更新阈值
-                if (results.size() == k) {
-                    min_score = results.back().first;
-                }
-            }
-        } 
-        else {
-            // --- 中间节点 (Index Node) ---
-            vector<Triple*> vec_child_triples = curr->child_triple;
+        // [关键逻辑改变]：如果 curr 为空，说明这是一个待访问的孩子，我们需要现在去取它 (Retrieve)
+        if (curr == nullptr) {
+            // 产生 1 次 ORAM IO
+            curr = Retrieve(client_, top.triple_info);
             
-            for (auto* triple : vec_child_triples) {
-                auto child_branch = Retrieve(client_, triple);
-                if (!child_branch) continue;
+            // 注意：取回后不需要再算分了，因为 top.score 已经是我们用父节点摘要算出来的准确分数
+        }
 
-                double child_score = client_->CalcuTestSPaceRele(child_branch, queryBranch);
-
-                // 【剪枝】入队前检查
-                // 如果已有 k 个结果且子节点分数低于阈值，则不入队
-                if (results.size() >= k && child_score < min_score) {
-                    // Do nothing (implicitly pruned)
-                } else {
-                    pq.push({child_score, child_branch});
-                }
-
-                // ORAM Eviction
-                if(client_->stash_.size() % Z == 0 && client_->stash_.size() != 0) {
-                    Eviction(client_); 
-                }
+        // 检查是否为数据节点 (假设 id >= 0 是数据， < 0 是中间节点)
+        // 注意：根据你的代码逻辑，叶子节点的 id 似乎是 >= 0 的
+        if (curr->child_triple.empty() || curr->id >= 0) { 
+            // 找到结果
+            results.push_back(make_pair(top.score, id_to_record_vec[curr->id]));
+            if (results.size() >= k) {
+                min_score = results.back().first;
             }
+        } else {
+            // 是中间节点：展开子节点
+            // [核心优化]：这里不再 Retrieve 孩子，而是利用 curr 中的摘要信息算分
+            
+            // 确保 Build 阶段正确填充了 child_rects 和 child_weights_vec
+            // 且大小与 child_triple 一致
+            size_t child_count = curr->child_triple.size();
+            
+            for (size_t i = 0; i < child_count; i++) {
+                Triple* child_t = curr->child_triple[i];
+                
+                // --- 模拟计算分数 (不进行 Retrieve) ---
+                // 我们需要一个临时的 Branch 对象来辅助计算，或者重载 CalcuTestSPaceRele
+                // 这里创建一个轻量级的 "Stub" Branch
+                Branch* stub = new Branch();
+                stub->m_rect = curr->child_rects[i];         // 从父节点拿矩形
+                stub->weight = curr->child_weights_vec[i];   // 从父节点拿权重
+                // 注意：stub->text 没有，但 weight 已经有了，CalcuTestSPaceRele 应该使用 weight
+                
+                // 计算分数 (纯内存操作，无 IO)
+                double score = client_->CalcuTestSPaceRele(stub, queryBranch);
+                
+                delete stub; // 用完即弃
+
+                // 将 {分数, 目标ID, nullptr} 推入队列
+                // nullptr 表示"还没取回"，等它浮动到堆顶时再取
+                pq.push({score, child_t, nullptr});
+            }
+            
+            // 当前节点处理完毕，如果内存满了需要驱逐
+            if(client_->stash_.size() % Z == 0 && client_->stash_.size() != 0) {
+                Eviction(client_); 
+            }
+        }
+        
+        // 如果 top.fetched_branch 不为空（比如根节点），这里不需要 delete，因为 Retrieve 返回的指针可能在 stash 中管理
+        // 但根据 Retrieve 的逻辑，它似乎返回一个 new 的对象。如果该对象被放入 stash，client 会管理。
+        // 此处逻辑需根据 Retrieve 的内存管理策略微调。
+    }
+    delete queryBranch;
+    return results;
+}
+
+
+void HOTree::Build(vector<DataRecord>& raw_data, Client* &client) {
+    // initial Client parameters using stash size Z and size of dataset N
+    if (raw_data.empty()) return;
+    
+    vector<Branch*> all_branchs; //record the all branch, including both leaf nodes and non-leaf nodes
+
+    id_to_record_vec = std::move(raw_data); 
+    vector<Branch*> position_branchs;
+    int temp_ID = 0;
+
+    // 1. 数据转换为 Branch
+    for (const auto& data : id_to_record_vec) {
+        Branch* mBranch = new Branch();
+        mBranch->is_empty_data = false;
+        mBranch->id = data.id;
+        mBranch->text = data.processed_text;
+        // mBranch->trueData = client_->cryptor_->aes_encrypt(padZero(data.processed_text), L); // ciphertext, it has been padded to blocksize before encrypting
+        
+        mBranch->CalcuKeyWordWeight(mBranch->text, dic_str); //当前使用的是叶子节点，因此，他需要跟每个关键词计算相似度
+
+        mBranch->m_rect.min_Rec[0] = mBranch->m_rect.max_Rec[0] = data.x_coord;
+        mBranch->m_rect.min_Rec[1] = mBranch->m_rect.max_Rec[1] = data.y_coord;
+        // mBranch->pointBranch = mBranch;
+        // mBranch->curNode = nullptr;
+
+        // append the leaf branch to vector
+        all_branchs.push_back(mBranch);
+        position_branchs.push_back(mBranch);
+        temp_ID++;
+    }
+    int data_num = position_branchs.size();
+
+    // 3. STR 构建
+    vector<Branch*> Branchs_at_IR_tree;
+    
+    // X 轴排序
+    sort(position_branchs.begin(), position_branchs.begin() + data_num, 
+         [](Branch* a, Branch* b) { return a->m_rect.min_Rec[0] < b->m_rect.min_Rec[0]; });
+
+    int current_idx = 0;
+    int non_leaf_branch_id = -1;
+    while (current_idx < position_branchs.size()) {//每次处理MAX_SIZE个数据
+        int end_idx = min((size_t)(current_idx + MAX_SIZE), position_branchs.size());
+        
+        // Y 轴局部排序
+        if (current_idx < data_num) {
+             int sort_end = min(end_idx, data_num);
+             sort(position_branchs.begin() + current_idx, position_branchs.begin() + sort_end,
+                  [](Branch* a, Branch* b) { return a->m_rect.min_Rec[1] < b->m_rect.min_Rec[1]; });
+        }
+
+        Branch* parent_branch = new Branch();
+        if(non_leaf_branch_id == -229 && if_is_debug) {
+            cout<<"1";
+        }
+        parent_branch->id = non_leaf_branch_id--;
+        parent_branch->initRectangle(); // 初始化矩形
+        //MAX_SIZE个数据放在一个节点m_node中，这个node包含这些branch的矩形
+        for (int i = current_idx; i < end_idx; i++) {
+            Branch* b = position_branchs[i];
+            Triple* temp_triple = new Triple(b->id, 0, 0);
+            parent_branch->child_triple.push_back(temp_triple);
+            parent_branch->child_branch.push_back(b);
+            parent_branch->rectUpdate(b); 
+            parent_branch->child_rects.push_back(b->m_rect);
+            parent_branch->child_weights_vec.push_back(b->weight);
+        }
+        current_idx = end_idx;
+        Branchs_at_IR_tree.push_back(parent_branch);
+        all_branchs.push_back(parent_branch);
+    }
+
+    // 向上构建，构建父节点
+    while (Branchs_at_IR_tree.size() > MAX_SIZE) {
+        vector<Branch*> parent_branchs; //记录当前层的节点向量
+        int branch_idx = 0;
+        
+        while (branch_idx < Branchs_at_IR_tree.size()) {
+            Branch* parent = new Branch(); //一个节点存MAX_SIZE个branch
+            parent->initRectangle();
+            parent->id = non_leaf_branch_id--;
+            int pack_count = 0;
+
+            while (pack_count < MAX_SIZE && branch_idx < Branchs_at_IR_tree.size()) { //遍历孩子节点，每MAX_SIZE变成一个新的branch
+                Branch* childBranch = Branchs_at_IR_tree[branch_idx];
+                // 聚合权重
+                childBranch->weight.resize(dic_str.size(), 0.0);
+                parent->keyWeightUpdate(childBranch);
+                // record parent infomation
+                parent->rectUpdate(childBranch); // 更新父节点 MBR
+                Triple* temp_triple = new Triple(childBranch->id, 0, 0);
+                parent->child_triple.push_back(temp_triple);
+                parent->child_branch.push_back(childBranch);
+
+                // [修改点2] 关键：将孩子的摘要信息保存到父节点中
+                parent->child_rects.push_back(childBranch->m_rect);
+                // 确保 childBranch->weight 已经被正确计算或初始化
+                parent->child_weights_vec.push_back(childBranch->weight);
+
+                // append the non-leaf branch to vector
+                branch_idx++;
+                pack_count++;
+            }
+            parent_branchs.push_back(parent);
+            all_branchs.push_back(parent);
+        }
+        Branchs_at_IR_tree = parent_branchs;
+    }
+    if (!Branchs_at_IR_tree.empty()) {
+        for(auto & b : Branchs_at_IR_tree) {
+            Triple* root_triple = new Triple(b->id, 0, 0);
+            root.push_back(root_triple);
+            // all_branchs.push_back(b);
         }
     }
 
-    delete queryBranch;
-    return results;
+    int N = all_branchs.size();
+    int l = ceil(log2(Z));   //the lowest level
+    int L = ceil(log2(N)); //the top level
+    for(auto & triple : root) {
+        triple->level = L;
+    }
+    client_ = new Client(L);
+    client_->min_level_ = l;
+    client_->max_level_ = L;
+    for(int level_i = 0; level_i <= L; level_i++) {
+        if (level_i < l) {
+            // 0 到 l-1 层填入空指针
+            vec_hashtable_.push_back(nullptr);
+        } else {
+            // l 到 L 层构建真实对象
+            // make_unique 会动态分配内存并返回指针
+            size_t size = pow(2, level_i);
+            vec_hashtable_.push_back(make_unique<CuckooTable>(size, level_i));
+        }
+    }
+    
+    for(auto & branch : all_branchs) {
+        // update the branch itself information
+        branch->level = L;
+        branch->trueData = client_->cryptor_->aes_encrypt(padZero(branch->text), L); // ciphertext, it has been padded to blocksize before encrypting
+        // update the child level
+        for(auto& triple : branch->child_triple) {
+            triple->level = L;
+        }
+        
+        // insert
+        vec_hashtable_[L]->insert(branch, client_);
+    }
+
+    for(int i = 0; i < vec_hashtable_[L]->stash.size(); i++) {
+        // move the stash to client, stash is so small that client is easy to save
+        Branch* temp_branch = vec_hashtable_[L]->stash[i];
+        temp_branch->trueData = client_->cryptor_->aes_decrypt(temp_branch->trueData, L);
+        client_->vector_every_level_stash_[L].push_back(temp_branch);
+    }
+    // vec_hashtable_[L]->stash.clear();
+    client_->vec_hotree_level_i_is_empty_[L] = false;
+    printf("Initially status is as following:");
+    string temp = "After Oblivious Shuffle & Insert level: "+L;
+    vec_hashtable_[L]->print_table_status(temp, client_->vector_every_level_stash_[L]);
 }
 
 // vector<pair<double, DataRecord>> HOTree::SearchTopK(double qx, double qy, string qText, int k, Client* client) {
@@ -546,157 +727,157 @@ vector<pair<double, DataRecord>> HOTree::SearchTopK(double qx, double qy, string
 //     return results;
 // }
 
-void HOTree::Build(vector<DataRecord>& raw_data, Client* &client) {
-    // initial Client parameters using stash size Z and size of dataset N
-    if (raw_data.empty()) return;
+// void HOTree::Build(vector<DataRecord>& raw_data, Client* &client) {
+//     // initial Client parameters using stash size Z and size of dataset N
+//     if (raw_data.empty()) return;
     
-    vector<Branch*> all_branchs; //record the all branch, including both leaf nodes and non-leaf nodes
+//     vector<Branch*> all_branchs; //record the all branch, including both leaf nodes and non-leaf nodes
 
-    id_to_record_vec = std::move(raw_data); 
-    vector<Branch*> position_branchs;
-    int temp_ID = 0;
+//     id_to_record_vec = std::move(raw_data); 
+//     vector<Branch*> position_branchs;
+//     int temp_ID = 0;
 
-    // 1. 数据转换为 Branch
-    for (const auto& data : id_to_record_vec) {
-        Branch* mBranch = new Branch();
-        mBranch->is_empty_data = false;
-        mBranch->id = data.id;
-        mBranch->text = data.processed_text;
-        // mBranch->trueData = client_->cryptor_->aes_encrypt(padZero(data.processed_text), L); // ciphertext, it has been padded to blocksize before encrypting
+//     // 1. 数据转换为 Branch
+//     for (const auto& data : id_to_record_vec) {
+//         Branch* mBranch = new Branch();
+//         mBranch->is_empty_data = false;
+//         mBranch->id = data.id;
+//         mBranch->text = data.processed_text;
+//         // mBranch->trueData = client_->cryptor_->aes_encrypt(padZero(data.processed_text), L); // ciphertext, it has been padded to blocksize before encrypting
         
-        mBranch->CalcuKeyWordWeight(mBranch->text, dic_str); //当前使用的是叶子节点，因此，他需要跟每个关键词计算相似度
+//         mBranch->CalcuKeyWordWeight(mBranch->text, dic_str); //当前使用的是叶子节点，因此，他需要跟每个关键词计算相似度
 
-        mBranch->m_rect.min_Rec[0] = mBranch->m_rect.max_Rec[0] = data.x_coord;
-        mBranch->m_rect.min_Rec[1] = mBranch->m_rect.max_Rec[1] = data.y_coord;
-        // mBranch->pointBranch = mBranch;
-        // mBranch->curNode = nullptr;
+//         mBranch->m_rect.min_Rec[0] = mBranch->m_rect.max_Rec[0] = data.x_coord;
+//         mBranch->m_rect.min_Rec[1] = mBranch->m_rect.max_Rec[1] = data.y_coord;
+//         // mBranch->pointBranch = mBranch;
+//         // mBranch->curNode = nullptr;
 
-        // append the leaf branch to vector
-        all_branchs.push_back(mBranch);
-        position_branchs.push_back(mBranch);
-        temp_ID++;
-    }
-    int data_num = position_branchs.size();
+//         // append the leaf branch to vector
+//         all_branchs.push_back(mBranch);
+//         position_branchs.push_back(mBranch);
+//         temp_ID++;
+//     }
+//     int data_num = position_branchs.size();
 
-    // 3. STR 构建
-    vector<Branch*> Branchs_at_IR_tree;
+//     // 3. STR 构建
+//     vector<Branch*> Branchs_at_IR_tree;
     
-    // X 轴排序
-    sort(position_branchs.begin(), position_branchs.begin() + data_num, 
-         [](Branch* a, Branch* b) { return a->m_rect.min_Rec[0] < b->m_rect.min_Rec[0]; });
+//     // X 轴排序
+//     sort(position_branchs.begin(), position_branchs.begin() + data_num, 
+//          [](Branch* a, Branch* b) { return a->m_rect.min_Rec[0] < b->m_rect.min_Rec[0]; });
 
-    int current_idx = 0;
-    int non_leaf_branch_id = -1;
-    while (current_idx < position_branchs.size()) {//每次处理MAX_SIZE个数据
-        int end_idx = min((size_t)(current_idx + MAX_SIZE), position_branchs.size());
+//     int current_idx = 0;
+//     int non_leaf_branch_id = -1;
+//     while (current_idx < position_branchs.size()) {//每次处理MAX_SIZE个数据
+//         int end_idx = min((size_t)(current_idx + MAX_SIZE), position_branchs.size());
         
-        // Y 轴局部排序
-        if (current_idx < data_num) {
-             int sort_end = min(end_idx, data_num);
-             sort(position_branchs.begin() + current_idx, position_branchs.begin() + sort_end,
-                  [](Branch* a, Branch* b) { return a->m_rect.min_Rec[1] < b->m_rect.min_Rec[1]; });
-        }
+//         // Y 轴局部排序
+//         if (current_idx < data_num) {
+//              int sort_end = min(end_idx, data_num);
+//              sort(position_branchs.begin() + current_idx, position_branchs.begin() + sort_end,
+//                   [](Branch* a, Branch* b) { return a->m_rect.min_Rec[1] < b->m_rect.min_Rec[1]; });
+//         }
 
-        Branch* parent_branch = new Branch();
-        if(non_leaf_branch_id == -229 && if_is_debug) {
-            cout<<"1";
-        }
-        parent_branch->id = non_leaf_branch_id--;
-        parent_branch->initRectangle(); // 初始化矩形
-        //MAX_SIZE个数据放在一个节点m_node中，这个node包含这些branch的矩形
-        for (int i = current_idx; i < end_idx; i++) {
-            Branch* b = position_branchs[i];
-            Triple* temp_triple = new Triple(b->id, 0, 0);
-            parent_branch->child_triple.push_back(temp_triple);
-            parent_branch->child_branch.push_back(b);
-            parent_branch->rectUpdate(b); 
-        }
-        current_idx = end_idx;
-        Branchs_at_IR_tree.push_back(parent_branch);
-        all_branchs.push_back(parent_branch);
-    }
+//         Branch* parent_branch = new Branch();
+//         if(non_leaf_branch_id == -229 && if_is_debug) {
+//             cout<<"1";
+//         }
+//         parent_branch->id = non_leaf_branch_id--;
+//         parent_branch->initRectangle(); // 初始化矩形
+//         //MAX_SIZE个数据放在一个节点m_node中，这个node包含这些branch的矩形
+//         for (int i = current_idx; i < end_idx; i++) {
+//             Branch* b = position_branchs[i];
+//             Triple* temp_triple = new Triple(b->id, 0, 0);
+//             parent_branch->child_triple.push_back(temp_triple);
+//             parent_branch->child_branch.push_back(b);
+//             parent_branch->rectUpdate(b); 
+//         }
+//         current_idx = end_idx;
+//         Branchs_at_IR_tree.push_back(parent_branch);
+//         all_branchs.push_back(parent_branch);
+//     }
 
-    // 向上构建，构建父节点
-    while (Branchs_at_IR_tree.size() > MAX_SIZE) {
-        vector<Branch*> parent_branchs; //记录当前层的节点向量
-        int branch_idx = 0;
+//     // 向上构建，构建父节点
+//     while (Branchs_at_IR_tree.size() > MAX_SIZE) {
+//         vector<Branch*> parent_branchs; //记录当前层的节点向量
+//         int branch_idx = 0;
         
-        while (branch_idx < Branchs_at_IR_tree.size()) {
-            Branch* parent = new Branch(); //一个节点存MAX_SIZE个branch
-            parent->initRectangle();
-            parent->id = non_leaf_branch_id--;
-            int pack_count = 0;
+//         while (branch_idx < Branchs_at_IR_tree.size()) {
+//             Branch* parent = new Branch(); //一个节点存MAX_SIZE个branch
+//             parent->initRectangle();
+//             parent->id = non_leaf_branch_id--;
+//             int pack_count = 0;
 
-            while (pack_count < MAX_SIZE && branch_idx < Branchs_at_IR_tree.size()) { //遍历孩子节点，每MAX_SIZE变成一个新的branch
-                Branch* childBranch = Branchs_at_IR_tree[branch_idx];
-                // 聚合权重
-                childBranch->weight.resize(dic_str.size(), 0.0);
-                parent->keyWeightUpdate(childBranch);
-                // record parent infomation
-                parent->rectUpdate(childBranch); // 更新父节点 MBR
-                Triple* temp_triple = new Triple(childBranch->id, 0, 0);
-                parent->child_triple.push_back(temp_triple);
-                parent->child_branch.push_back(childBranch);
-                // append the non-leaf branch to vector
-                branch_idx++;
-                pack_count++;
-            }
-            parent_branchs.push_back(parent);
-            all_branchs.push_back(parent);
-        }
-        Branchs_at_IR_tree = parent_branchs;
-    }
-    if (!Branchs_at_IR_tree.empty()) {
-        for(auto & b : Branchs_at_IR_tree) {
-            Triple* root_triple = new Triple(b->id, 0, 0);
-            root.push_back(root_triple);
-            // all_branchs.push_back(b);
-        }
-    }
+//             while (pack_count < MAX_SIZE && branch_idx < Branchs_at_IR_tree.size()) { //遍历孩子节点，每MAX_SIZE变成一个新的branch
+//                 Branch* childBranch = Branchs_at_IR_tree[branch_idx];
+//                 // 聚合权重
+//                 childBranch->weight.resize(dic_str.size(), 0.0);
+//                 parent->keyWeightUpdate(childBranch);
+//                 // record parent infomation
+//                 parent->rectUpdate(childBranch); // 更新父节点 MBR
+//                 Triple* temp_triple = new Triple(childBranch->id, 0, 0);
+//                 parent->child_triple.push_back(temp_triple);
+//                 parent->child_branch.push_back(childBranch);
+//                 // append the non-leaf branch to vector
+//                 branch_idx++;
+//                 pack_count++;
+//             }
+//             parent_branchs.push_back(parent);
+//             all_branchs.push_back(parent);
+//         }
+//         Branchs_at_IR_tree = parent_branchs;
+//     }
+//     if (!Branchs_at_IR_tree.empty()) {
+//         for(auto & b : Branchs_at_IR_tree) {
+//             Triple* root_triple = new Triple(b->id, 0, 0);
+//             root.push_back(root_triple);
+//             // all_branchs.push_back(b);
+//         }
+//     }
 
-    int N = all_branchs.size();
-    int l = ceil(log2(Z));   //the lowest level
-    int L = ceil(log2(N)); //the top level
-    for(auto & triple : root) {
-        triple->level = L;
-    }
-    client_ = new Client(L);
-    client_->min_level_ = l;
-    client_->max_level_ = L;
-    for(int level_i = 0; level_i <= L; level_i++) {
-        if (level_i < l) {
-            // 0 到 l-1 层填入空指针
-            vec_hashtable_.push_back(nullptr);
-        } else {
-            // l 到 L 层构建真实对象
-            // make_unique 会动态分配内存并返回指针
-            size_t size = pow(2, level_i);
-            vec_hashtable_.push_back(make_unique<CuckooTable>(size, level_i));
-        }
-    }
+//     int N = all_branchs.size();
+//     int l = ceil(log2(Z));   //the lowest level
+//     int L = ceil(log2(N)); //the top level
+//     for(auto & triple : root) {
+//         triple->level = L;
+//     }
+//     client_ = new Client(L);
+//     client_->min_level_ = l;
+//     client_->max_level_ = L;
+//     for(int level_i = 0; level_i <= L; level_i++) {
+//         if (level_i < l) {
+//             // 0 到 l-1 层填入空指针
+//             vec_hashtable_.push_back(nullptr);
+//         } else {
+//             // l 到 L 层构建真实对象
+//             // make_unique 会动态分配内存并返回指针
+//             size_t size = pow(2, level_i);
+//             vec_hashtable_.push_back(make_unique<CuckooTable>(size, level_i));
+//         }
+//     }
     
-    for(auto & branch : all_branchs) {
-        // update the branch itself information
-        branch->level = L;
-        branch->trueData = client_->cryptor_->aes_encrypt(padZero(branch->text), L); // ciphertext, it has been padded to blocksize before encrypting
-        // update the child level
-        for(auto& triple : branch->child_triple) {
-            triple->level = L;
-        }
+//     for(auto & branch : all_branchs) {
+//         // update the branch itself information
+//         branch->level = L;
+//         branch->trueData = client_->cryptor_->aes_encrypt(padZero(branch->text), L); // ciphertext, it has been padded to blocksize before encrypting
+//         // update the child level
+//         for(auto& triple : branch->child_triple) {
+//             triple->level = L;
+//         }
         
-        // insert
-        vec_hashtable_[L]->insert(branch, client_);
-    }
+//         // insert
+//         vec_hashtable_[L]->insert(branch, client_);
+//     }
 
-    for(int i = 0; i < vec_hashtable_[L]->stash.size(); i++) {
-        // move the stash to client, stash is so small that client is easy to save
-        Branch* temp_branch = vec_hashtable_[L]->stash[i];
-        temp_branch->trueData = client_->cryptor_->aes_decrypt(temp_branch->trueData, L);
-        client_->vector_every_level_stash_[L].push_back(temp_branch);
-    }
-    // vec_hashtable_[L]->stash.clear();
-    client_->vec_hotree_level_i_is_empty_[L] = false;
-    printf("Initially status is as following:");
-    string temp = "After Oblivious Shuffle & Insert level: "+L;
-    vec_hashtable_[L]->print_table_status(temp, client_->vector_every_level_stash_[L]);
-}
+//     for(int i = 0; i < vec_hashtable_[L]->stash.size(); i++) {
+//         // move the stash to client, stash is so small that client is easy to save
+//         Branch* temp_branch = vec_hashtable_[L]->stash[i];
+//         temp_branch->trueData = client_->cryptor_->aes_decrypt(temp_branch->trueData, L);
+//         client_->vector_every_level_stash_[L].push_back(temp_branch);
+//     }
+//     // vec_hashtable_[L]->stash.clear();
+//     client_->vec_hotree_level_i_is_empty_[L] = false;
+//     printf("Initially status is as following:");
+//     string temp = "After Oblivious Shuffle & Insert level: "+L;
+//     vec_hashtable_[L]->print_table_status(temp, client_->vector_every_level_stash_[L]);
+// }

@@ -79,6 +79,12 @@ Branch::Branch(const Branch* other) {
     // 这里的逻辑根据你的业务需求决定：
     this->partent = other->partent; 
     this->child_branch = other->child_branch; // 这里存的是指针，依然指向原来的子节点
+
+    // 【新增修改】关键点：复制子节点的摘要信息
+    // 这两个 vector 存储的是对象（Rectangle）和数据（vector<double>），
+    // 这里的直接赋值会自动执行深拷贝，不需要写循环。
+    this->child_rects = other->child_rects; 
+    this->child_weights_vec = other->child_weights_vec;
 }
 
 bool Branch::operator<(const Branch& other) const {

@@ -39,6 +39,9 @@ public:
     std::string trueData;     // 真实数据
     bool is_empty_data;       // 记录是否为空数据
     bool is_dummy_for_shuffle;// just for shuffle
+    std::vector<Rectangle> child_rects; 
+    // 存储子节点的关键词权重，用于父节点直接计算子节点的文本相关性
+    std::vector<std::vector<double>> child_weights_vec; 
 
     std::vector<Triple*> child_triple;
     std::vector<Branch*> child_branch;
