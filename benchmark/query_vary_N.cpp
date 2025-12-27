@@ -7,7 +7,7 @@
 #include <numeric>
 #include <random>
 #include <algorithm>
-
+#include <math.h>
 #include "tree.h"
 #include "hotree.h"
 #include "DataReader.h"
@@ -23,10 +23,10 @@ struct DatasetConfig {
     string data_path;
 };
 
-const int NUM_QUERIES = 50; // 增加样本数以获得更准确的平均值
+const int NUM_QUERIES = 100000; // 增加样本数以获得更准确的平均值
 const int FIXED_K = 1;
 // const vector<int> N_VALUES = {1024, 2048}; 
-const vector<int> N_VALUES = {1024, 1024*2, 1024*4, 1024*8, 1024*16};
+const vector<int> N_VALUES = {1024, (int)pow(2,11), (int)pow(2,12), (int)pow(2,13), (int)pow(2,14)};
 // 定义四个数据集
 vector<DatasetConfig> datasets = {
     {"yelp",       "../../dataset/yelp/keywords_dict.txt",       "../../dataset/yelp/dataset.txt"},
@@ -67,11 +67,11 @@ int main() {
 
             // 4. 从当前数据中随机选取查询
             vector<DataRecord> sampled_queries;
-            if(ds.name == "synthetic") {
-                sampled_queries = readDataFromDataset("../../dataset/synthetic/query.txt", NUM_QUERIES);
+            if(ds.name == "synthetic1") {
+                sampled_queries = readDataFromDataset("../../dataset/synthetic/query.txt", 50);
             }
             else {
-                sampled_queries = readDataFromDataset(ds.data_path, NUM_QUERIES);
+                sampled_queries = readDataFromDataset(ds.data_path, n);
             }
             std::shuffle(sampled_queries.begin(), sampled_queries.end(), gen);
 
