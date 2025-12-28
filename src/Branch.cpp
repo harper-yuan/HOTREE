@@ -87,6 +87,18 @@ Branch::Branch(const Branch* other) {
     this->child_weights_vec = other->child_weights_vec;
 }
 
+Branch::~Branch() {
+    for (auto* t : child_triple) {
+        if (t) delete t;
+    }
+    child_triple.clear();
+    
+    child_branch.clear(); 
+    // 注意：child_branch 只是指针引用，通常不需要在这里删除，
+    // 除非 Branch 拥有 child_branch 的绝对所有权。
+    // 根据你的 Build 逻辑，all_branchs 负责管理 Branch 本身，所以这里不动 child_branch。
+}
+
 bool Branch::operator<(const Branch& other) const {
     double x1 = (m_rect.min_Rec[0] + m_rect.max_Rec[0]) / 2;
     // double y1 = (m_rect.min_Rec[1] + m_rect.max_Rec[1]) / 2;

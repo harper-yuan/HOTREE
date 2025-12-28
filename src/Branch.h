@@ -52,6 +52,7 @@ public:
     Branch(bool empty_data, bool dummy_for_shuffle);
     Branch(const Branch* other);
 
+    ~Branch();
     bool operator<(const Branch& other) const;
     
     void textUpdate(Branch* mbranch);

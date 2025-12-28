@@ -33,9 +33,17 @@ void Client::UpdateSeed(size_t level_i) {
     vec_seed2_[level_i] = dis(gen);
 }
 
+// src/client.cpp
 Client::~Client() {
     delete cryptor_;
     cryptor_ = nullptr;
+
+    // ✅ 正确做法：只清空容器，不删除指针 (因为 HOTree 会删)
+    stash_.clear();
+    for (auto& level_vec : vector_every_level_stash_) {
+        level_vec.clear();
+    }
+    vector_every_level_stash_.clear();
 }
 
 int Client::get_first_empty_level() {
@@ -118,52 +126,166 @@ void Client::ObliviousMergeSplit(
     int num_levels_shuffle,
     int HOTREE_level
 ) {
-    // communication_round_trip_++;
-    
-    // 使用静态局部变量作为 Dummy 指针，避免反复创建对象
+    // 1. 定义静态 Dummy，避免频繁 new/delete
     static Branch dummy_branch(true, true);
 
     std::vector<Branch*> pool;
+    // 预留空间，避免 push_back 时的扩容开销
     pool.reserve(bucket_in_0.size() + bucket_in_1.size());
 
-    // 1. 解密并下载真实数据
+    // ============================================================
+    // 第一阶段：并行解密 (必须严格保护共享的 dummy 节点)
+    // ============================================================
+    omp_set_num_threads(num_threads);
+
+    // 处理 bucket_in_0
+    #pragma omp parallel for
+    for(size_t i = 0; i < bucket_in_0.size(); ++i) {
+        Branch* s = bucket_in_0[i];
+        // 核心修复：先判断是否为空或 Dummy，绝对不能对共享 Dummy 进行写操作！
+        if (s != nullptr && !s->is_dummy_for_shuffle) {
+            s->trueData = cryptor_->aes_decrypt(s->trueData, HOTREE_level);
+        }
+    }
+
+    // 处理 bucket_in_1
+    #pragma omp parallel for
+    for(size_t i = 0; i < bucket_in_1.size(); ++i) {
+        Branch* s = bucket_in_1[i];
+        // 核心修复：同上
+        if (s != nullptr && !s->is_dummy_for_shuffle) {
+            s->trueData = cryptor_->aes_decrypt(s->trueData, HOTREE_level);
+        }
+    }
+
+    // ============================================================
+    // 第二阶段：串行收集 (指针拷贝极快，无需并行，避免锁竞争)
+    // ============================================================
     for(auto* s : bucket_in_0) {
-        if (s == nullptr || s->is_dummy_for_shuffle) continue; 
-        s->trueData = cryptor_->aes_decrypt(s->trueData, HOTREE_level);
-        pool.push_back(s);
+        if (s != nullptr && !s->is_dummy_for_shuffle) {
+            pool.push_back(s);
+        }
     }
     for(auto* s : bucket_in_1) {
-        if (s == nullptr || s->is_dummy_for_shuffle) continue;
-        s->trueData = cryptor_->aes_decrypt(s->trueData, HOTREE_level);
-        pool.push_back(s);
+        if (s != nullptr && !s->is_dummy_for_shuffle) {
+            pool.push_back(s);
+        }
     }
     
+    // 准备输出容器
     std::vector<Branch*> real_elements_0;
     std::vector<Branch*> real_elements_1;
+    real_elements_0.reserve(Z);
+    real_elements_1.reserve(Z);
 
-    // 2. 本地路由逻辑
+    // ============================================================
+    // 第三阶段：并行加密 (同样跳过 dummy)
+    // ============================================================
+    // pool 中只包含非 dummy 元素，所以这里可以直接并行加密
+    #pragma omp parallel for
+    for(size_t i = 0; i < pool.size(); ++i) {
+        Branch* elem = pool[i];
+        elem->trueData = cryptor_->aes_encrypt(elem->trueData, HOTREE_level);
+    }
+
+    // ============================================================
+    // 第四阶段：本地路由 (逻辑运算)
+    // ============================================================
     int check_bit = num_levels_shuffle - 1 - level_index;
     int mask = 1 << check_bit;
+    size_t mod_size = 1 << num_levels_shuffle; // 使用位运算替代 pow
 
     for (auto* elem : pool) {
-        if (compute_hash(combine_unique(elem->id, elem->counter_for_lastest_data), pow(2, num_levels_shuffle)) & mask) {
-            elem->trueData = cryptor_->aes_encrypt(elem->trueData, HOTREE_level);
+        // compute_hash 是只读的，安全
+        if (compute_hash(combine_unique(elem->id, elem->counter_for_lastest_data), mod_size) & mask) {
             real_elements_1.push_back(elem);
         } else {
-            elem->trueData = cryptor_->aes_encrypt(elem->trueData, HOTREE_level);
             real_elements_0.push_back(elem);
         }
     }
 
-    // 3. 填充指针而不是填充对象
+    // ============================================================
+    // 第五阶段：填充静态 Dummy 指针
+    // ============================================================
+    // 这里只填入指针，不创建新对象，非常安全且高效
     while (real_elements_0.size() < Z) real_elements_0.push_back(&dummy_branch);
     while (real_elements_1.size() < Z) real_elements_1.push_back(&dummy_branch);
 
     bucket_out_0 = std::move(real_elements_0);
     bucket_out_1 = std::move(real_elements_1);
-    
-    // communication_volume_ += (bucket_in_0.size() + bucket_in_1.size()) * BlockSize;
 }
+// void Client::ObliviousMergeSplit(
+//     std::vector<Branch*>& bucket_in_0,
+//     std::vector<Branch*>& bucket_in_1,
+//     std::vector<Branch*>& bucket_out_0,
+//     std::vector<Branch*>& bucket_out_1,
+//     int level_index,
+//     int num_levels_shuffle,
+//     int HOTREE_level
+// ) {
+//     // communication_round_trip_++;
+    
+//     // 使用静态局部变量作为 Dummy 指针，避免反复创建对象
+//     static Branch dummy_branch(true, true);
+
+//     std::vector<Branch*> pool;
+//     pool.reserve(bucket_in_0.size() + bucket_in_1.size());
+
+//     // 1. 解密并下载真实数据
+//     omp_set_num_threads(num_threads);
+//     #pragma omp parallel for
+//     for(auto* s : bucket_in_0) {
+//         if (s != nullptr) {
+//             s->trueData = cryptor_->aes_decrypt(s->trueData, HOTREE_level);
+//             if(s->is_dummy_for_shuffle) {
+//                 continue;
+//             }
+//             else {
+//                 pool.push_back(s);
+//             }
+            
+//         }
+//     }
+//     #pragma omp parallel for
+//     for(auto* s : bucket_in_1) {
+//         if (s != nullptr) {
+//             s->trueData = cryptor_->aes_decrypt(s->trueData, HOTREE_level);
+//             if(s->is_dummy_for_shuffle) {
+//                 continue;
+//             }
+//             else {
+//                 pool.push_back(s);
+//             }
+            
+//         }
+//     }
+    
+//     std::vector<Branch*> real_elements_0;
+//     std::vector<Branch*> real_elements_1;
+
+//     // 2. 本地路由逻辑
+//     int check_bit = num_levels_shuffle - 1 - level_index;
+//     int mask = 1 << check_bit;
+
+//     for (auto* elem : pool) {
+//         if (compute_hash(combine_unique(elem->id, elem->counter_for_lastest_data), pow(2, num_levels_shuffle)) & mask) {
+//             elem->trueData = cryptor_->aes_encrypt(elem->trueData, HOTREE_level);
+//             real_elements_1.push_back(elem);
+//         } else {
+//             elem->trueData = cryptor_->aes_encrypt(elem->trueData, HOTREE_level);
+//             real_elements_0.push_back(elem);
+//         }
+//     }
+
+//     // 3. 填充指针而不是填充对象
+//     while (real_elements_0.size() < Z) real_elements_0.push_back(&dummy_branch);
+//     while (real_elements_1.size() < Z) real_elements_1.push_back(&dummy_branch);
+
+//     bucket_out_0 = std::move(real_elements_0);
+//     bucket_out_1 = std::move(real_elements_1);
+    
+//     // communication_volume_ += (bucket_in_0.size() + bucket_in_1.size()) * BlockSize;
+// }
 
 void Client::ObliviousMergeSplit_firstlevel(
     std::vector<Branch*>& bucket_in_0,

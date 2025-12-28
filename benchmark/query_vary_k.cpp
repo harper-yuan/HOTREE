@@ -21,9 +21,9 @@ struct DatasetConfig {
     string data_path;
 };
 
-const int NUM_QUERIES = 100000;
+const int NUM_QUERIES = 1500;
 const int FIXED_N = 1024; // 固定数据规模
-const vector<int> K_VALUES = {1, 3, 5, 7};
+const vector<int> K_VALUES = {1, 2, 4, 8, 16};
 vector<DatasetConfig> datasets = {
     {"yelp", "../../dataset/yelp/keywords_dict.txt", "../../dataset/yelp/dataset.txt"},
     {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},

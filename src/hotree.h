@@ -21,14 +21,14 @@ public:
 public:
     HOTree(const std::vector<std::string>& dict);
     ~HOTree();
-
+    
     void Build(std::vector<DataRecord>& raw_data, Client*& client);
     void Eviction(Client* client);
     Client* getClient();
     std::vector<std::pair<double, DataRecord>> SearchTopK(double qx, double qy, std::string qText, int k, Client* client);
     Branch* Retrieve(Client* client_, Triple*& triple);
     Branch* Access(uint64_t id, int counter_for_lastest_data, int level_i);
-    Branch* Self_healing_Access(int id, int counter_for_lastest_data);
+    Branch* Self_healing_Access(int id, int counter_for_lastest_data, int prediction_level);
 
     // for debug
     std::vector<double> GetTextWeight(std::string text);

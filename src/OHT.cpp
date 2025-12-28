@@ -129,212 +129,76 @@ void CuckooTable::rehash(size_t new_size, Client* client) {
     }
 }
 
-// void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_elements, std::vector<int> branchs_level_belong_to, Client* client) {
-//     table.assign(pow(2, HOTREE_level_), Entry());
-//     stash.clear();
-//     current_count = 0;
-//     client->UpdateSeed(HOTREE_level_);
+std::vector<Branch*> CuckooTable::oblivious_tight_compaction(std::vector<Branch*> all_elements1, std::vector<int> branchs_level_belong_to, Client* client) {
+    std::vector<Branch*> result_branchs;
+    std::unordered_map<int, Branch*> unique_elements;
+    for (auto& elem : all_elements1) {
+        if (elem == nullptr) continue;
 
-//     /*--------------------------------oblivous tight compaction-----------------------------------*/
-//     // 1. 使用 map 进行去重，保留 counter 最大的元素
-//     // key: id, value: Branch*
-//     if(HOTREE_level_ == client->max_level_) {
-//         std::unordered_map<int, Branch*> unique_elements;
-//         for (auto& elem : all_elements) {
-//             if (elem == nullptr) continue;
+        int id = elem->id;
+        // 如果 id 不存在，或者当前元素的 counter 更大，则更新/插入
+        if (unique_elements.find(id) == unique_elements.end() || 
+            elem->counter_for_lastest_data > unique_elements[id]->counter_for_lastest_data) {
+            unique_elements[id] = elem;
+        }
+    }
+    for (auto const& [id, elem] : unique_elements) {
+        if (id == debug_id && if_is_debug) {
+            printf("Inserting unique id %d with max counter %d in OHT.cpp\n", 
+                elem->id, elem->counter_for_lastest_data);
+        }
+        elem->level = HOTREE_level_;
+        elem->counter_for_lastest_data = 0;
+        for(auto & triple : elem->child_triple) {
+            triple->counter_for_lastest_data = 0;
+            triple->level = HOTREE_level_;
+        }
+        result_branchs.push_back(elem);
+        // all_elements.push_back(elem);
+    }
+    return result_branchs;
+}
 
-//             int id = elem->id;
-//             // 如果 id 不存在，或者当前元素的 counter 更大，则更新/插入
-//             if (unique_elements.find(id) == unique_elements.end() || 
-//                 elem->counter_for_lastest_data > unique_elements[id]->counter_for_lastest_data) {
-//                 unique_elements[id] = elem;
-//             }
-//         }
-
-//         // 2. 遍历去重后的结果并执行插入
-//         for (auto const& [id, elem] : unique_elements) {
-//             if (id == debug_id && if_is_debug) {
-//                 printf("Inserting unique id %d with max counter %d in OHT.cpp\n", 
-//                     elem->id, elem->counter_for_lastest_data);
-//             }
-//             elem->level = HOTREE_level_;
-//             elem->counter_for_lastest_data = 0;
-//             for(auto & triple : elem->child_triple) {
-//                 triple->counter_for_lastest_data = 0;
-//                 triple->level = HOTREE_level_;
-//             }
-//             insert(elem, client);
-//         }
-
-//         return;
-//     }
-//     else {
-//         table.assign(pow(2,HOTREE_level_), Entry());
-//         stash.clear();
-//         current_count = 0;
-//         client->UpdateSeed(HOTREE_level_);
-//         for(auto &elem : all_elements) {
-//             if(elem->id == debug_id && if_is_debug) {
-//                 printf("id %d exist with counter %d in OHT.cpp\n", elem->id, elem->counter_for_lastest_data);
-//             }
-//             insert(elem, client);
-//             // printf("insert id %d in level %d with table size counter %d\n", elem->id, HOTREE_level_, current_count);
-//         }
-//         return ; 
-//     }
-//     // ... 后续被注释掉的 oblivious shuffle 代码 ...
-
-//     int N_real = all_elements.size();
-//     int B;
-//     if(N_real > Z) B = pow(2, ceil(log2(2.0 * N_real / Z)));
-//     else B = pow(2, ceil(log2(2.0 * sqrt(N_real))));
-//     int num_levels_shuffle = ceil(log2(B));
-
-//     /* This decryption step can be securely implemented by recording the layer 
-//     where the input data itself is located (which the server can already know), 
-//     and then decrypting the data within the ObliviousMergeSplit function based 
-//     on the layer where the original data is located. All decrypted data is encrypted 
-//     using the key corresponding to the new layer, but for the sake of concise and easy to 
-//     understand code, we will decrypt it here. Note that this does not affect performance. */
-//     for(int i = 0; i < all_elements.size(); i++) {
-//         all_elements[i]->trueData = client->cryptor_->aes_decrypt(all_elements[i]->trueData, branchs_level_belong_to[i]);
-//     }
-
-//     std::vector<std::vector<std::vector<Branch*>>> memory(num_levels_shuffle + 1);
-
-//     int data_idx = 0;
-//     for(int i = 0; i < num_levels_shuffle + 1; ++i) {
-//         memory[i].resize(B);
-//         for(int b = 0; b < B; ++b) {
-//             memory[i][b].reserve(Z);
-//             for(int k = 0; k < Z; ++k) {
-//                 if(i == 0 && k < Z / 2 && data_idx < all_elements.size()) {
-//                     memory[i][b].push_back(all_elements[data_idx++]);
-//                 } else {
-//                     Branch* dummy_branch = new Branch(true, true);
-//                     memory[i][b].push_back(dummy_branch); // 仅存储指针
-//                 }
-//             }
-//         }
-//     }
-
-//     // Butterfly network
-//     omp_set_num_threads(num_threads);
-//     for (int i = 0; i < num_levels_shuffle; ++i) {
-//         // #pragma omp parallel for
-//         for (int j = 0; j < B / 2; ++j) {
-//             int power_of_2_i = 1 << i;
-//             int power_of_2_i_plus_1 = 1 << (i + 1);
-            
-//             int source_idx_1 = (j % power_of_2_i) + (j / power_of_2_i) * power_of_2_i_plus_1;
-//             int source_idx_2 = source_idx_1 + power_of_2_i;
-
-//             if(i == 0) {
-//                 client->ObliviousMergeSplit_firstlevel(
-//                     memory[i][source_idx_1],
-//                     memory[i][source_idx_2],
-//                     memory[i+1][2 * j],
-//                     memory[i+1][2 * j + 1],
-//                     i,
-//                     num_levels_shuffle,
-//                     HOTREE_level_
-//                 );
-//             }
-//             else {
-//                 client->ObliviousMergeSplit(
-//                     memory[i][source_idx_1],
-//                     memory[i][source_idx_2],
-//                     memory[i+1][2 * j],
-//                     memory[i+1][2 * j + 1],
-//                     i,
-//                     num_levels_shuffle,
-//                     HOTREE_level_
-//                 );
-//             }
-//         }
-//         client->communication_round_trip_ += (B / 2) / num_threads;
-//         // this level have B/2 bin, every bin have 2Z block, every block have size Blocksize, one trip (retrieve from server, send to server)
-//         client->communication_volume_ += (B / 2) * 2 * Z * BlockSize * 2; 
-//     }
-//     // Note that we have num_threads threads, Data between different threads is do not affect each other. We can send using one trip.
-    
-//     // clear table and reinsert
-//     table.assign(pow(2,HOTREE_level_), Entry());
-//     stash.clear();
-//     current_count = 0;
-//     client->UpdateSeed(HOTREE_level_);
-
-    
-//     /* According to the paper "Bucket Oblivious Sort:An Extremely Simple Oblivious Sort", 
-//     since the middle layer of the shuffle network is oblivious, the number of real elements (loads) 
-//     contained in each bin of the final layer of the shuffle network result can be leaked. 
-//     This information can still be transmitted from the client through the ObliviousMergeSplit function, 
-//     so there is no increase in communication volume and communication rounds (volume of loads is small compared to encrypted data and ignored). */
-    
-//     // for(int i = 0; i < B; i++) {
-//     //     for(auto* branch : memory[num_levels_shuffle][i]) {
-//     //         if(branch != nullptr && !branch->is_dummy_for_shuffle) {
-//     //             insert(branch, client);
-//     //         }
-//     //     }
-//     // }
-// }
-
-void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_elements, std::vector<int> branchs_level_belong_to, Client* client) {
+void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_elements_before_otc, std::vector<int> branchs_level_belong_to, Client* client) {
     table.assign(pow(2, HOTREE_level_), Entry());
     stash.clear();
     current_count = 0;
     client->UpdateSeed(HOTREE_level_);
+    std::vector<Branch*> all_elements;
 
-    /*--------------------------------oblivous tight compaction-----------------------------------*/
-    // 1. 使用 map 进行去重，保留 counter 最大的元素
-    // key: id, value: Branch*
-    if(HOTREE_level_ == client->max_level_) {
-        std::unordered_map<int, Branch*> unique_elements;
-        for (auto& elem : all_elements) {
-            if (elem == nullptr) continue;
-
-            int id = elem->id;
-            // 如果 id 不存在，或者当前元素的 counter 更大，则更新/插入
-            if (unique_elements.find(id) == unique_elements.end() || 
-                elem->counter_for_lastest_data > unique_elements[id]->counter_for_lastest_data) {
-                unique_elements[id] = elem;
+    if(all_elements_before_otc.size() <= TEE_Z ) {
+        if(HOTREE_level_ != client->max_level_) {
+            table.assign(pow(2,HOTREE_level_), Entry());
+            stash.clear();
+            current_count = 0;
+            client->UpdateSeed(HOTREE_level_);
+            for(auto &elem : all_elements_before_otc) {
+                if(elem->id == debug_id && if_is_debug) {
+                    printf("id %d exist with counter %d in OHT.cpp\n", elem->id, elem->counter_for_lastest_data);
+                }
+                insert(elem, client);
+                // printf("insert id %d in level %d with table size counter %d\n", elem->id, HOTREE_level_, current_count);
             }
+            return ; 
         }
-
-        // 2. 遍历去重后的结果并执行插入
-        for (auto const& [id, elem] : unique_elements) {
-            if (id == debug_id && if_is_debug) {
-                printf("Inserting unique id %d with max counter %d in OHT.cpp\n", 
-                    elem->id, elem->counter_for_lastest_data);
+        else {
+            /*--------------------------------oblivous tight compaction-----------------------------------*/
+            all_elements = oblivious_tight_compaction(all_elements_before_otc, branchs_level_belong_to, client);
+            for(auto &elem : all_elements) {
+                insert(elem, client);
             }
-            elem->level = HOTREE_level_;
-            elem->counter_for_lastest_data = 0;
-            for(auto & triple : elem->child_triple) {
-                triple->counter_for_lastest_data = 0;
-                triple->level = HOTREE_level_;
-            }
-            insert(elem, client);
+            return ;
         }
-
-        return;
     }
-    // else {
-    //     table.assign(pow(2,HOTREE_level_), Entry());
-    //     stash.clear();
-    //     current_count = 0;
-    //     client->UpdateSeed(HOTREE_level_);
-    //     for(auto &elem : all_elements) {
-    //         if(elem->id == debug_id && if_is_debug) {
-    //             printf("id %d exist with counter %d in OHT.cpp\n", elem->id, elem->counter_for_lastest_data);
-    //         }
-    //         insert(elem, client);
-    //         // printf("insert id %d in level %d with table size counter %d\n", elem->id, HOTREE_level_, current_count);
-    //     }
-    //     return ; 
-    // }
-    // ... 后续被注释掉的 oblivious shuffle 代码 ...
-
+    if(all_elements_before_otc.size() > TEE_Z ) {
+        if(HOTREE_level_ == client->max_level_) {
+            /*--------------------------------oblivous tight compaction-----------------------------------*/
+            all_elements = oblivious_tight_compaction(all_elements_before_otc, branchs_level_belong_to, client);
+        }
+        else {
+            all_elements = std::move(all_elements_before_otc);
+        }
+    }
     int N_real = all_elements.size();
     int B;
     if(N_real > Z) B = pow(2, ceil(log2(2.0 * N_real / Z)));
@@ -347,12 +211,17 @@ void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_element
     on the layer where the original data is located. All decrypted data is encrypted 
     using the key corresponding to the new layer, but for the sake of concise and easy to 
     understand code, we will decrypt it here. Note that this does not affect performance. */
+    omp_set_num_threads(num_threads);
+    #pragma omp parallel for
     for(int i = 0; i < all_elements.size(); i++) {
         all_elements[i]->trueData = client->cryptor_->aes_decrypt(all_elements[i]->trueData, branchs_level_belong_to[i]);
     }
 
     std::vector<std::vector<std::vector<Branch*>>> memory(num_levels_shuffle + 1);
-
+    // ✅【修复步骤 1】定义一个局部向量，作为“垃圾回收站”
+    std::vector<Branch*> dummy_garbage_collector;
+    dummy_garbage_collector.reserve(B * Z * (num_levels_shuffle + 1));
+    
     int data_idx = 0;
     for(int i = 0; i < num_levels_shuffle + 1; ++i) {
         memory[i].resize(B);
@@ -364,6 +233,8 @@ void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_element
                 } else {
                     Branch* dummy_branch = new Branch(true, true);
                     memory[i][b].push_back(dummy_branch); // 仅存储指针
+                    // 将其加入垃圾回收站，以便稍后释放
+                    dummy_garbage_collector.push_back(dummy_branch);
                 }
             }
         }
@@ -410,6 +281,9 @@ void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_element
     // Note that we have num_threads threads, Data between different threads is do not affect each other. We can send using one trip.
     
     // clear table and reinsert
+    for (auto* b : dummy_garbage_collector) {
+        delete b;
+    }
     table.assign(pow(2,HOTREE_level_), Entry());
     stash.clear();
     current_count = 0;

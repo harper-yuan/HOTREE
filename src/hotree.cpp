@@ -75,21 +75,17 @@ HOTree::HOTree(const vector<string>& dict){
 }
 
 HOTree::~HOTree() {
-    // 既然 all_branchs 已经保存了所有的 Branch，包括根、中间、叶子
-    // 我们只需要把这张清单上的东西全部销毁即可，不需要管它们是什么关系
+    
+    // 修改后：让 Branch 的析构函数自己负责 Triple 的清理
     for (auto* b : all_branchs) {
-        if (b) {
-            // 先处理 Branch 内部的 Triple 碎屑
-            for (auto* t : b->child_triple) delete t;
-            // 释放 Branch
-            delete b;
-        }
+        if (b) delete b; // 这会自动调用 Branch::~Branch() 清理内部的 Triple
     }
+    all_branchs.clear();
     
-    // 最后清理 root 里的 Triple 指针
+    // root 里的 Triple 是独立的，需要单独清理
     for (auto* t : root) delete t;
+    root.clear();
     
-    // 释放 Client
     delete client_;
 }
 
@@ -237,6 +233,8 @@ Branch* HOTree::Access(uint64_t id, int counter_for_lastest_data, int level_i) {
                     if(elem != nullptr) {
                         if(elem->id == id && elem->counter_for_lastest_data == counter_for_lastest_data) {
                             result_branch = new Branch(elem);
+                            // ✅【修复】新增这一行：将新对象交给 HOTree 管理
+                            all_branchs.push_back(result_branch);
                         }
                     }   
                 }
@@ -252,7 +250,7 @@ Branch* HOTree::Access(uint64_t id, int counter_for_lastest_data, int level_i) {
     return result_branch;
 }
 
-Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data) {
+Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data, int prediction_level) {
     Branch* result_branch = nullptr;
     client_->communication_round_trip_ += 0.5; // only half trip, no need to put back
     client_->counter_self_healing_access_ += 1;
@@ -279,7 +277,7 @@ Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data) {
     if(result_branch != nullptr) return result_branch;
 
     /*--------------------------------find the data on server tables---------------------*/
-    for(int i = client_->min_level_; i < client_->vec_hotree_level_i_is_empty_.size(); i++) {
+    for(int i = prediction_level; i < client_->vec_hotree_level_i_is_empty_.size(); i++) {
         if(client_->vec_hotree_level_i_is_empty_[i]) {
             continue; // empty level pass
         }
@@ -292,22 +290,26 @@ Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data) {
                     std::cout<<"In self heal search level"<< i <<" p1: "<<p1 << " seed: "<<client_->vec_seed1_[i]<<" table size"<< vec_hashtable_[i]->getTableCapacity()<<std::endl;
                 }
                 auto vec_temp_branch = vec_hashtable_[i]->find_hotree(id, p1, p2);
-                client_->communication_volume_ += BlockSize*2; // two blocks
+                int level_num_is_not_empty = count(client_->vec_hotree_level_i_is_empty_.begin() + client_->min_level_, client_->vec_hotree_level_i_is_empty_.begin() + client_->max_level_ + 1, false);
+                client_->communication_volume_ += level_num_is_not_empty*BlockSize*2; // two blocks
                 for(auto& elem : vec_temp_branch) {
                     if(elem != nullptr) {
                         elem->trueData = client_->cryptor_->aes_decrypt(elem->trueData, i);
                         if(elem->id == id && elem->counter_for_lastest_data == counter_for_lastest_data) {
                             result_branch = new Branch(elem);
+                            // ✅【修复】新增这一行：将新对象交给 HOTree 管理
+                            all_branchs.push_back(result_branch);
+                            return result_branch;
                         }
                     }   
                 }
             }
-            else { //dummy lookup but no need to decrypt beacause data have found
-                size_t p1 = client_->getRandomIndex(vec_hashtable_[i]->getTableCapacity());
-                size_t p2 = client_->getRandomIndex(vec_hashtable_[i]->getTableCapacity());
-                client_->communication_volume_ += BlockSize*2; // two blocks
-                auto vec_temp_branch = vec_hashtable_[i]->find_hotree(id, p1, p2);
-            }
+            // else { //dummy lookup but no need to decrypt beacause data have found
+            //     size_t p1 = client_->getRandomIndex(vec_hashtable_[i]->getTableCapacity());
+            //     size_t p2 = client_->getRandomIndex(vec_hashtable_[i]->getTableCapacity());
+            //     client_->communication_volume_ += BlockSize*2; // two blocks
+            //     auto vec_temp_branch = vec_hashtable_[i]->find_hotree(id, p1, p2);
+            // }
         }
     }
     return result_branch;
@@ -353,7 +355,7 @@ Branch* HOTree::Retrieve(Client* client_, Triple*& triple) {
             child_branch->trueData = client_->cryptor_->aes_decrypt(child_branch->trueData, level_i); // decrypt the data using secret key in level i
         }
         else { // if not found, target id must be the level gerter than prediction level
-            child_branch = Self_healing_Access(id, counter_for_lastest_data);
+            child_branch = Self_healing_Access(id, counter_for_lastest_data, level_i);
         }
     }
 
@@ -493,8 +495,6 @@ vector<pair<double, DataRecord>> HOTree::SearchTopK(double qx, double qy, string
 void HOTree::Build(vector<DataRecord>& raw_data, Client* &client) {
     // initial Client parameters using stash size Z and size of dataset N
     if (raw_data.empty()) return;
-    
-    vector<Branch*> all_branchs; //record the all branch, including both leaf nodes and non-leaf nodes
 
     id_to_record_vec = std::move(raw_data); 
     vector<Branch*> position_branchs;
@@ -648,7 +648,7 @@ void HOTree::Build(vector<DataRecord>& raw_data, Client* &client) {
     }
     // vec_hashtable_[L]->stash.clear();
     client_->vec_hotree_level_i_is_empty_[L] = false;
-    printf("Initially status is as following:");
+    // printf("Initially status is as following:");
     string temp = "After Oblivious Shuffle & Insert level: "+L;
     vec_hashtable_[L]->print_table_status(temp, client_->vector_every_level_stash_[L]);
 }
