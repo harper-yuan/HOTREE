@@ -214,78 +214,6 @@ void Client::ObliviousMergeSplit(
     bucket_out_0 = std::move(real_elements_0);
     bucket_out_1 = std::move(real_elements_1);
 }
-// void Client::ObliviousMergeSplit(
-//     std::vector<Branch*>& bucket_in_0,
-//     std::vector<Branch*>& bucket_in_1,
-//     std::vector<Branch*>& bucket_out_0,
-//     std::vector<Branch*>& bucket_out_1,
-//     int level_index,
-//     int num_levels_shuffle,
-//     int HOTREE_level
-// ) {
-//     // communication_round_trip_++;
-    
-//     // 使用静态局部变量作为 Dummy 指针，避免反复创建对象
-//     static Branch dummy_branch(true, true);
-
-//     std::vector<Branch*> pool;
-//     pool.reserve(bucket_in_0.size() + bucket_in_1.size());
-
-//     // 1. 解密并下载真实数据
-//     omp_set_num_threads(num_threads);
-//     #pragma omp parallel for
-//     for(auto* s : bucket_in_0) {
-//         if (s != nullptr) {
-//             s->trueData = cryptor_->aes_decrypt(s->trueData, HOTREE_level);
-//             if(s->is_dummy_for_shuffle) {
-//                 continue;
-//             }
-//             else {
-//                 pool.push_back(s);
-//             }
-            
-//         }
-//     }
-//     #pragma omp parallel for
-//     for(auto* s : bucket_in_1) {
-//         if (s != nullptr) {
-//             s->trueData = cryptor_->aes_decrypt(s->trueData, HOTREE_level);
-//             if(s->is_dummy_for_shuffle) {
-//                 continue;
-//             }
-//             else {
-//                 pool.push_back(s);
-//             }
-            
-//         }
-//     }
-    
-//     std::vector<Branch*> real_elements_0;
-//     std::vector<Branch*> real_elements_1;
-
-//     // 2. 本地路由逻辑
-//     int check_bit = num_levels_shuffle - 1 - level_index;
-//     int mask = 1 << check_bit;
-
-//     for (auto* elem : pool) {
-//         if (compute_hash(combine_unique(elem->id, elem->counter_for_lastest_data), pow(2, num_levels_shuffle)) & mask) {
-//             elem->trueData = cryptor_->aes_encrypt(elem->trueData, HOTREE_level);
-//             real_elements_1.push_back(elem);
-//         } else {
-//             elem->trueData = cryptor_->aes_encrypt(elem->trueData, HOTREE_level);
-//             real_elements_0.push_back(elem);
-//         }
-//     }
-
-//     // 3. 填充指针而不是填充对象
-//     while (real_elements_0.size() < Z) real_elements_0.push_back(&dummy_branch);
-//     while (real_elements_1.size() < Z) real_elements_1.push_back(&dummy_branch);
-
-//     bucket_out_0 = std::move(real_elements_0);
-//     bucket_out_1 = std::move(real_elements_1);
-    
-//     // communication_volume_ += (bucket_in_0.size() + bucket_in_1.size()) * BlockSize;
-// }
 
 void Client::ObliviousMergeSplit_firstlevel(
     std::vector<Branch*>& bucket_in_0,
@@ -337,4 +265,235 @@ void Client::ObliviousMergeSplit_firstlevel(
 
     bucket_out_0 = std::move(real_elements_0);
     bucket_out_1 = std::move(real_elements_1);
+}
+
+
+void Client::ObliviousMergeSplit_last_level(
+    std::vector<Branch*>& bucket_in_0,
+    std::vector<Branch*>& bucket_in_1,
+    std::vector<Branch*>& bucket_out_0,
+    std::vector<Branch*>& bucket_out_1,
+    int level_index,        // 新逻辑中不再使用，保留以兼容接口
+    int num_levels_shuffle, // 新逻辑中不再使用，保留以兼容接口
+    int HOTREE_level
+) {
+    // 1. 定义静态 Dummy，避免频繁 new/delete
+    static Branch dummy_branch(true, true);
+
+    std::vector<Branch*> pool;
+    // 预留空间，避免 push_back 时的扩容开销
+    pool.reserve(bucket_in_0.size() + bucket_in_1.size());
+
+    // ============================================================
+    // 第一阶段：并行解密 (必须严格保护共享的 dummy 节点)
+    // ============================================================
+    // 这一步非常关键，必须先解密才能进行后续的 ID 比较排序
+    omp_set_num_threads(num_threads);
+
+    // 处理 bucket_in_0
+    #pragma omp parallel for
+    for(size_t i = 0; i < bucket_in_0.size(); ++i) {
+        Branch* s = bucket_in_0[i];
+        // 核心修复：先判断是否为空或 Dummy，绝对不能对共享 Dummy 进行写操作！
+        if (s != nullptr && !s->is_dummy_for_shuffle) {
+            s->trueData = cryptor_->aes_decrypt(s->trueData, HOTREE_level);
+        }
+    }
+
+    // 处理 bucket_in_1
+    #pragma omp parallel for
+    for(size_t i = 0; i < bucket_in_1.size(); ++i) {
+        Branch* s = bucket_in_1[i];
+        // 核心修复：同上
+        if (s != nullptr && !s->is_dummy_for_shuffle) {
+            s->trueData = cryptor_->aes_decrypt(s->trueData, HOTREE_level);
+        }
+    }
+
+    // ============================================================
+    // 第二阶段：串行收集 (只收集 Real 元素)
+    // ============================================================
+    for(auto* s : bucket_in_0) {
+        if (s != nullptr && !s->is_dummy_for_shuffle) {
+            pool.push_back(s);
+        }
+    }
+    for(auto* s : bucket_in_1) {
+        if (s != nullptr && !s->is_dummy_for_shuffle) {
+            pool.push_back(s);
+        }
+    }
+
+    // ============================================================
+    // ★★★ 第三阶段：全值排序 (替代原本的位运算路由) ★★★
+    // ============================================================
+    // 此时 pool 中的数据已解密，可以安全读取 ID 和 Counter
+    // 使用 std::sort 替代原本的 "if (hash & mask)"
+    std::sort(pool.begin(), pool.end(), [](const Branch* a, const Branch* b) {
+        // 安全性检查 (虽然 pool 里应该没有 nullptr)
+        if (a == nullptr) return false;
+        if (b == nullptr) return true;
+
+        // 1. 第一优先级：按 ID 升序
+        // 保证相同 ID 的元素紧挨在一起
+        if (a->id != b->id) {
+            return a->id < b->id;
+        }
+
+        // 2. 第二优先级：按 Counter 降序
+        // 保证相同 ID 中，Counter 大的（最新的）排在前面
+        return a->counter_for_lastest_data > b->counter_for_lastest_data;
+    });
+
+    // ============================================================
+    // 第四阶段：并行加密 (同样跳过 dummy)
+    // ============================================================
+    // 排序后，Real 元素都在 pool 里，直接并行加密
+    #pragma omp parallel for
+    for(size_t i = 0; i < pool.size(); ++i) {
+        Branch* elem = pool[i];
+        elem->trueData = cryptor_->aes_encrypt(elem->trueData, HOTREE_level);
+    }
+
+    // ============================================================
+    // 第五阶段：按顺序切分并填充 Dummy (Split)
+    // ============================================================
+    // 清空并预留输出空间
+    bucket_out_0.clear();
+    bucket_out_1.clear();
+    bucket_out_0.reserve(Z);
+    bucket_out_1.reserve(Z);
+
+    size_t total_real = pool.size();
+
+    // --- 填充 Bucket 0 (取排序后的前 Z 个) ---
+    for (size_t i = 0; i < Z; ++i) {
+        if (i < total_real) {
+            bucket_out_0.push_back(pool[i]);
+        } else {
+            // Real 元素不够，补 Dummy
+            bucket_out_0.push_back(&dummy_branch);
+        }
+    }
+
+    // --- 填充 Bucket 1 (取排序后的后 Z 个) ---
+    for (size_t i = 0; i < Z; ++i) {
+        // 计算在 pool 中的索引：Z + i
+        size_t pool_idx = Z + i; 
+        
+        if (pool_idx < total_real) {
+            bucket_out_1.push_back(pool[pool_idx]);
+        } else {
+            // Real 元素耗尽，补 Dummy
+            bucket_out_1.push_back(&dummy_branch);
+        }
+    }
+}
+
+void Client::ObliviousMergeSplit_firstlevel_last_level(
+    std::vector<Branch*>& bucket_in_0,
+    std::vector<Branch*>& bucket_in_1,
+    std::vector<Branch*>& bucket_out_0,
+    std::vector<Branch*>& bucket_out_1,
+    int level_index,        // 在新逻辑中不再使用，但为了保持接口兼容保留
+    int num_levels_shuffle, // 在新逻辑中不再使用，但为了保持接口兼容保留
+    int HOTREE_level
+) {
+    // 1. 定义静态 Dummy，避免频繁 new/delete，且保证所有 Dummy 指向同一地址
+    static Branch dummy_branch(true, true);
+
+    std::vector<Branch*> pool;
+    // 预留空间，避免 push_back 时的扩容开销
+    pool.reserve(bucket_in_0.size() + bucket_in_1.size());
+
+    // ============================================================
+    // 第一阶段：设置线程 (解密逻辑需确保在调用此函数前或在此处完成)
+    // ============================================================
+    // 注意：std::sort 需要读取明文 ID。如果 bucket_in 中的数据是密文，
+    // 请确保在放入 pool 之前或在此处调用 aes_decrypt。
+    // 假设输入数据在此阶段 ID 是可读的。
+    omp_set_num_threads(num_threads);
+
+    // ============================================================
+    // 第二阶段：串行收集 Real 元素 (过滤掉 Dummy)
+    // ============================================================
+    // 我们只把真实的元素放入池中进行排序
+    for(auto* s : bucket_in_0) {
+        if (s != nullptr && !s->is_dummy_for_shuffle) {
+            pool.push_back(s);
+        }
+    }
+    for(auto* s : bucket_in_1) {
+        if (s != nullptr && !s->is_dummy_for_shuffle) {
+            pool.push_back(s);
+        }
+    }
+
+    // ============================================================
+    // ★★★ 第三阶段：全值排序 (替代原本的路由逻辑) ★★★
+    // ============================================================
+    // 使用 std::sort 进行确定性排序：
+    // 1. 相同的 ID 会聚在一起。
+    // 2. 相同的 ID 中，Counter 大的（最新的）排在前面。
+    std::sort(pool.begin(), pool.end(), [](const Branch* a, const Branch* b) {
+        // 安全性检查 (虽然 pool 里应该没有 nullptr)
+        if (a == nullptr) return false;
+        if (b == nullptr) return true;
+
+        // 1. 第一优先级：按 ID 升序
+        if (a->id != b->id) {
+            return a->id < b->id;
+        }
+
+        // 2. 第二优先级：按 Counter 降序 (最新的在前)
+        return a->counter_for_lastest_data > b->counter_for_lastest_data;
+    });
+
+    // ============================================================
+    // 第四阶段：并行加密 (只加密 Real 元素)
+    // ============================================================
+    // 排序后，pool 中的元素顺序已定，现在并行更新它们的密文
+    #pragma omp parallel for
+    for(size_t i = 0; i < pool.size(); ++i) {
+        Branch* elem = pool[i];
+        // 重新加密数据块
+        elem->trueData = cryptor_->aes_encrypt(elem->trueData, HOTREE_level);
+    }
+
+    // ============================================================
+    // 第五阶段：按顺序切分并填充 Dummy (Split)
+    // ============================================================
+    // 清空并预留输出空间
+    bucket_out_0.clear();
+    bucket_out_1.clear();
+    bucket_out_0.reserve(Z);
+    bucket_out_1.reserve(Z);
+
+    size_t total_real = pool.size();
+
+    // --- 填充 Bucket 0 (取排序后的前 Z 个) ---
+    for (size_t i = 0; i < Z; ++i) {
+        if (i < total_real) {
+            bucket_out_0.push_back(pool[i]);
+        } else {
+            // Real 元素不够填满 Z，补 Dummy
+            bucket_out_0.push_back(&dummy_branch);
+        }
+    }
+
+    // --- 填充 Bucket 1 (取排序后的后 Z 个) ---
+    for (size_t i = 0; i < Z; ++i) {
+        // 计算在 pool 中的索引：Z + i
+        size_t pool_idx = Z + i;
+        
+        if (pool_idx < total_real) {
+            bucket_out_1.push_back(pool[pool_idx]);
+        } else {
+            // Real 元素耗尽，补 Dummy
+            bucket_out_1.push_back(&dummy_branch);
+        }
+    }
+    
+    // 此时 bucket_out_0 和 bucket_out_1 已经包含了排序并加密好的数据
+    // 且大小严格为 Z
 }

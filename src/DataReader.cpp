@@ -24,41 +24,55 @@ vector<DataRecord> readDataFromDataset(const string& filename, int N) {
 
     // 逐行读取，直到文件结束或达到 N 条记录的限制
     while (getline(inputFile, line) && read_count < N) {
+        if (line.empty()) continue;
+
         istringstream iss(line);
-        DataRecord record;
-        
-        string text;
-        double p1 = 0, p2 = 0;
-
-        // 尝试解析一行数据，格式: text p1 p2
-        if (!(iss >> text >> p1 >> p2)) {
-            // 如果解析失败，可能是空行或格式错误，跳过
-            continue; 
+        vector<string> tokens;
+        string temp;
+        // 先将整行按空格拆分成所有单词（token）
+        while (iss >> temp) {
+            tokens.push_back(temp);
         }
 
-        record.original_text = text;
-        record.x_coord = p1;
-        record.y_coord = p2;
+        // 每一行必须至少包含：关键词(至少一个单词) + p1 + p2
+        if (tokens.size() < 3) continue; 
 
-        // --- 仿照 OBIR-tree 的文本规范化逻辑 (固定长度为 5) ---
-        string processed_text;
-        
-        if (text.size() > 5) {
-            // 截断到前 5 个字符
-            processed_text = text.substr(0, 5);
-        } else if (text.size() < 5) {
-            // 填充 'X' 使长度达到 5 (对应原始代码中的 string(5 - text.size(), 'X'))
-            processed_text = text + string(5 - text.size(), 'X');
-        } else {
-            // 长度正好为 5
-            processed_text = text;
+        // 1. 提取坐标：最后两个元素一定是 p1 和 p2
+        try {
+            double p2 = stod(tokens.back());
+            tokens.pop_back();
+            double p1 = stod(tokens.back());
+            tokens.pop_back();
+
+            // 2. 提取关键词：剩下的所有元素重新拼接起来
+            string original_text = "";
+            for (size_t i = 0; i < tokens.size(); ++i) {
+                original_text += tokens[i];
+                if (i != tokens.size() - 1) original_text += " ";
+            }
+
+            DataRecord record;
+            record.original_text = original_text;
+            record.x_coord = p1;
+            record.y_coord = p2;
+
+            // --- 保持你原有的文本规范化逻辑 (固定长度为 5) ---
+            string processed_text = original_text;
+            if (processed_text.size() > 5) {
+                processed_text = processed_text.substr(0, 5);
+            } else if (processed_text.size() < 5) {
+                processed_text += string(5 - processed_text.size(), 'X');
+            }
+            
+            record.processed_text = processed_text;
+            record.id = data_ID++;
+            
+            records.push_back(record);
+            read_count++;
+        } catch (...) {
+            // 如果 stod 转换失败（例如格式不符），跳过此行
+            continue;
         }
-        
-        record.processed_text = processed_text;
-        record.id = data_ID++;
-        
-        records.push_back(record);
-        read_count++;
     }
 
     inputFile.close();
@@ -82,41 +96,55 @@ vector<DataRecord> readDataFromDataset(const string& filename) {
 
     // 逐行读取，直到文件结束或达到 N 条记录的限制
     while (getline(inputFile, line)) {
+        if (line.empty()) continue;
+
         istringstream iss(line);
-        DataRecord record;
-        
-        string text;
-        double p1 = 0, p2 = 0;
-
-        // 尝试解析一行数据，格式: text p1 p2
-        if (!(iss >> text >> p1 >> p2)) {
-            // 如果解析失败，可能是空行或格式错误，跳过
-            continue; 
+        vector<string> tokens;
+        string temp;
+        // 先将整行按空格拆分成所有单词（token）
+        while (iss >> temp) {
+            tokens.push_back(temp);
         }
 
-        record.original_text = text;
-        record.x_coord = p1;
-        record.y_coord = p2;
+        // 每一行必须至少包含：关键词(至少一个单词) + p1 + p2
+        if (tokens.size() < 3) continue; 
 
-        // --- 仿照 OBIR-tree 的文本规范化逻辑 (固定长度为 5) ---
-        string processed_text;
-        
-        if (text.size() > 5) {
-            // 截断到前 5 个字符
-            processed_text = text.substr(0, 5);
-        } else if (text.size() < 5) {
-            // 填充 'X' 使长度达到 5 (对应原始代码中的 string(5 - text.size(), 'X'))
-            processed_text = text + string(5 - text.size(), 'X');
-        } else {
-            // 长度正好为 5
-            processed_text = text;
+        // 1. 提取坐标：最后两个元素一定是 p1 和 p2
+        try {
+            double p2 = stod(tokens.back());
+            tokens.pop_back();
+            double p1 = stod(tokens.back());
+            tokens.pop_back();
+
+            // 2. 提取关键词：剩下的所有元素重新拼接起来
+            string original_text = "";
+            for (size_t i = 0; i < tokens.size(); ++i) {
+                original_text += tokens[i];
+                if (i != tokens.size() - 1) original_text += " ";
+            }
+
+            DataRecord record;
+            record.original_text = original_text;
+            record.x_coord = p1;
+            record.y_coord = p2;
+
+            // --- 保持你原有的文本规范化逻辑 (固定长度为 5) ---
+            string processed_text = original_text;
+            if (processed_text.size() > 5) {
+                processed_text = processed_text.substr(0, 5);
+            } else if (processed_text.size() < 5) {
+                processed_text += string(5 - processed_text.size(), 'X');
+            }
+            
+            record.processed_text = processed_text;
+            record.id = data_ID++;
+            
+            records.push_back(record);
+            read_count++;
+        } catch (...) {
+            // 如果 stod 转换失败（例如格式不符），跳过此行
+            continue;
         }
-        
-        record.processed_text = processed_text;
-        record.id = data_ID++;
-        
-        records.push_back(record);
-        read_count++;
     }
 
     inputFile.close();

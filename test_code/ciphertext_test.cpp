@@ -102,14 +102,15 @@ BOOST_AUTO_TEST_CASE(test1) {
 }
 
 BOOST_AUTO_TEST_CASE(test_query_timing) {
+    int query_num = 2048;
     // 1. 数据加载与树构建 (与 test1 共享相同的设置)
     std::random_device rd; 
     std::mt19937 gen(rd()); 
     
     // 假设这些文件和函数已被正确定义和包含
-    vector<string> dictionary = LoadDictionary("../../dataset/synthetic/keywords_dict.txt");
-    vector<DataRecord> data = readDataFromDataset("../../dataset/synthetic/dataset.txt", pow(2,10)); // 1024条数据
-    vector<DataRecord> queries = readDataFromDataset("../../dataset/synthetic/query.txt"); // 1024条查询
+    vector<string> dictionary = LoadDictionary("../../dataset/yelp/keywords_dict.txt");
+    vector<DataRecord> data = readDataFromDataset("../../dataset/yelp/dataset.txt", pow(2,10)); // 1024条数据
+    vector<DataRecord> queries = readDataFromDataset("../../dataset/yelp/dataset.txt",query_num); // 1024条查询
     
     // 检查数据完整性
     if (data.empty() || queries.empty()) {
@@ -129,7 +130,7 @@ BOOST_AUTO_TEST_CASE(test_query_timing) {
     std::shuffle(query_indices.begin(), query_indices.end(), gen);
     
     // 取前50个
-    int num_queries = std::min(50, static_cast<int>(queries.size()));
+    int num_queries = std::min(2048, static_cast<int>(queries.size()));
     std::vector<int> selected_indices(query_indices.begin(), query_indices.begin() + num_queries);
     
     // 3. 为每个查询选择不同的k值（可选）

@@ -33,7 +33,7 @@ vector<DatasetConfig> datasets = {
 int main() {
     string result_filename = "../exp_result/query_vary_K.csv";
     ofstream csv(result_filename);
-    csv << "Dataset,N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize,Access,Self_Access\n";
+    csv << "Scheme,Dataset,N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize,Access,Self_Access\n";
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -91,7 +91,7 @@ int main() {
             double avg_a = (double)total_counter_access / actual_queries;
             double avg_as = (double)total_counter_self_healing_acces / actual_queries;
 
-            csv << ds.name << "," << FIXED_N << "," << k << "," << avg_t << "," << avg_r << "," << avg_v << "," << BlockSize <<  "," << avg_a<< "," << avg_as << "\n";
+            csv << "HOTREE,"<<ds.name << "," << FIXED_N << "," << k << "," << avg_t << "," << avg_r << "," << avg_v << "," << BlockSize <<  "," << avg_a<< "," << avg_as << "\n";
             cout << "  [K=" << setw(2) << k << "] Time: " << fixed << setprecision(2) << avg_t << "ms" << endl;
         }
     }

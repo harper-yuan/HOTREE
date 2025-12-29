@@ -6,8 +6,8 @@ To compile, run the following commands from the root directory of the repository
 
 ```sh
 mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Debug .. #debug mode
-# cmake -DCMAKE_BUILD_TYPE=Release .. 
+# cmake -DCMAKE_BUILD_TYPE=Debug .. #debug mode
+cmake -DCMAKE_BUILD_TYPE=Release .. -DBLOCK_SIZE_VAL=2048
 make -j
 ```
 ## comparison

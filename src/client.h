@@ -58,6 +58,24 @@ public:
         int num_levels_shuffle,
         int HOTREE_level
     );
+    void ObliviousMergeSplit_last_level(
+        std::vector<Branch*>& bucket_in_0,
+        std::vector<Branch*>& bucket_in_1,
+        std::vector<Branch*>& bucket_out_0,
+        std::vector<Branch*>& bucket_out_1,
+        int level_index,
+        int num_levels_shuffle,
+        int HOTREE_level
+    );
+    void ObliviousMergeSplit_firstlevel_last_level(
+        std::vector<Branch*>& bucket_in_0,
+        std::vector<Branch*>& bucket_in_1,
+        std::vector<Branch*>& bucket_out_0,
+        std::vector<Branch*>& bucket_out_1,
+        int level_index,
+        int num_levels_shuffle,
+        int HOTREE_level
+    );
     void UpdateSeed(size_t level_i);
     // 生成随机数的函数
     size_t getRandomIndex(size_t mod_size) {
