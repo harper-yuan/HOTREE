@@ -21,13 +21,14 @@ struct DatasetConfig {
     string data_path;
 };
 
-const int NUM_QUERIES = 1500;
-const int FIXED_N = 1024; // 固定数据规模
-const vector<int> K_VALUES = {1, 2, 4, 8, 16};
+const int NUM_QUERIES = 1;
+const int FIXED_N = (int)pow(2,10); // 固定数据规模
+// const vector<int> K_VALUES = {1, 2, 3, 4, 5, 6, 7, 8};
+const vector<int> K_VALUES = {8};
 vector<DatasetConfig> datasets = {
-    {"yelp", "../../dataset/yelp/keywords_dict.txt", "../../dataset/yelp/dataset.txt"},
-    {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
-    {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
+    // {"yelp", "../../dataset/yelp/keywords_dict.txt", "../../dataset/yelp/dataset.txt"},
+    // {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
+    // {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
     {"synthetic", "../../dataset/synthetic/keywords_dict.txt", "../../dataset/synthetic/dataset.txt"}
 };
 int main() {

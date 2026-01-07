@@ -25,17 +25,17 @@ struct DatasetConfig {
     string data_path;
 };
 
-const int NUM_QUERIES = 102400000; // 样本数
+const int NUM_QUERIES = Z; // 样本数
 const int FIXED_K = 1;
 
 // const vector<int> N_VALUES = {1024, 2048}; 
-const vector<int> N_VALUES = {1024, (int)pow(2,12), (int)pow(2,14), (int)pow(2,16), (int)pow(2,18), (int)pow(2,20)};
+const vector<int> N_VALUES = {(int)pow(2,16)};
 
 // 定义四个数据集
 vector<DatasetConfig> datasets = {
-    {"yelp",       "../../dataset/yelp/keywords_dict.txt",       "../../dataset/yelp/dataset.txt"},
-    {"tweets",     "../../dataset/tweets/keywords_dict.txt",     "../../dataset/tweets/dataset.txt"},
-    {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
+    // {"yelp",       "../../dataset/yelp/keywords_dict.txt",       "../../dataset/yelp/dataset.txt"},
+    // {"tweets",     "../../dataset/tweets/keywords_dict.txt",     "../../dataset/tweets/dataset.txt"},
+    // {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
     {"synthetic",  "../../dataset/synthetic/keywords_dict.txt",  "../../dataset/synthetic/dataset.txt"}
 };
 
