@@ -30,9 +30,14 @@ public:
     Branch* Access(uint64_t id, int counter_for_lastest_data, int level_i);
     Branch* Self_healing_Access(int id, int counter_for_lastest_data, int prediction_level);
 
+
     // for debug
     std::vector<double> GetTextWeight(std::string text);
     void print_stash();
     void findid(int target_id);
+
+    // for evaluation
+    double compute_additional_oblivious_shuffle_time();
+    void clear_additional_oblivious_shuffle_time();
 };
 

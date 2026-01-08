@@ -1,2 +1,0 @@
-Scheme,Dataset,N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize,Access,Self_Access
-HOTREE,synthetic,1048576,1,0.997336,3.23438,445792,4096,6.47266,0

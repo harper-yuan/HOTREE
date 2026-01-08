@@ -7,6 +7,24 @@ void HOTree::print_stash() {
     }
 }
 
+
+void HOTree::clear_additional_oblivious_shuffle_time() {
+    for(int i = client_->min_level_; i <= client_->max_level_; i++) {
+        vec_hashtable_[i]->shuffle_count = 0;
+    }
+}
+double HOTree::compute_additional_oblivious_shuffle_time() {
+    double result = 0;
+    for(int i = client_->min_level_; i <= client_->max_level_; i++) {
+        // 计算当前层级的开销
+        double current_level_time = (double)vec_hashtable_[i]->shuffle_count * vec_hashtable_[i]->single_shuffle_times;
+
+        result += current_level_time;
+    }
+    
+    return result;
+}
+
 void HOTree::findid(int target_id) {
 
     // 1. 遍历 vec_hashtable_ 中的每一层
@@ -97,6 +115,7 @@ When client memory is full, merge this memory and all upper level data(until the
 Merging is non-oblivious, because we use oblivous shuffle to confuse the all queried data after merging
 */
 void HOTree::Eviction(Client* client) {
+    // cout<<"Stash have "<<client->stash_.size()<<" elems"<<endl;
     vector<Branch*> all_shuffled_branchs;
     vector<int> branchs_level_belong_to;
     int target_level = client_->get_first_empty_level();
@@ -116,17 +135,20 @@ void HOTree::Eviction(Client* client) {
                     branchs_level_belong_to.push_back(level_i);
                 }
             }
+            vec_hashtable_[level_i]->table.clear();
 
             // move the data in cuckoo table stash to a vector
             for(auto & elem : client_->vector_every_level_stash_[level_i]) {
                 elem->level = target_level;
+                elem->trueData = client->cryptor_->aes_encrypt(elem->trueData, target_level);
                 all_shuffled_branchs.push_back(elem);
                 branchs_level_belong_to.push_back(level_i);
             }
-            
+            client_->vector_every_level_stash_[level_i].clear();
+
             // if data have removed, clear hash table
             client->vec_hotree_level_i_is_empty_[level_i] = true; // level_i will be empty
-            client_->vector_every_level_stash_[level_i].clear();
+            
             if(if_is_debug) {
                 cout<<"level "<<level_i<<" is no empty"<<endl;
             }
@@ -142,7 +164,9 @@ void HOTree::Eviction(Client* client) {
                 branchs_level_belong_to.push_back(target_level);
             }
         }
+        vec_hashtable_[target_level]->table.clear();
         // if data have removed, clear hash table
+        
         for(auto & elem : client_->vector_every_level_stash_[target_level]) {
             elem->level = target_level;
             all_shuffled_branchs.push_back(elem);
@@ -150,7 +174,6 @@ void HOTree::Eviction(Client* client) {
         }
         client_->vector_every_level_stash_[target_level].clear();
 
-        
         for(auto & triple : root) {
             triple->level = target_level;
             triple->counter_for_lastest_data = 0;
@@ -177,9 +200,6 @@ void HOTree::Eviction(Client* client) {
                 triple->level = target_level;
             }
         }
-        if(branch->id == debug_id && if_is_debug) {
-            printf("id %d exist with counter %d in hotree.cpp\n", branch->id, branch->counter_for_lastest_data);
-        }
     }
     
     /*-------------------------oblivious shuffle-------------------------------*/
@@ -192,15 +212,15 @@ void HOTree::Eviction(Client* client) {
         temp_branch->trueData = client->cryptor_->aes_decrypt(temp_branch->trueData, target_level);
         client_->vector_every_level_stash_[target_level].push_back(temp_branch);
     }
-    // vec_hashtable_[target_level]->stash.clear();
-
-    for(int level_i = client_->min_level_; level_i <= client_->max_level_; level_i++) {
-        if(!client_->vec_hotree_level_i_is_empty_[level_i]) {
-            string temp = "After Oblivious Shuffle & Insert level: "+level_i;
-            vec_hashtable_[level_i]->print_table_status(temp,client_->vector_every_level_stash_[level_i]);
-        }
-    }
+    vec_hashtable_[target_level]->stash.clear();
+    
     if(if_is_debug) {
+        for(int level_i = client_->min_level_; level_i <= client_->max_level_; level_i++) {
+        if(!client_->vec_hotree_level_i_is_empty_[level_i]) {
+                string temp = "After Oblivious Shuffle & Insert level: "+level_i;
+                vec_hashtable_[level_i]->print_table_status(temp,client_->vector_every_level_stash_[level_i]);
+            }
+        }
         cout<< all_shuffled_branchs.size() <<" data is shuffled and moved to level: "<<target_level<<endl;
         cout<<"---------------------------------------end shuffle---------------------------------------\n";
     }
@@ -234,9 +254,9 @@ Branch* HOTree::Access(uint64_t id, int counter_for_lastest_data, int level_i) {
                         if(elem->id == id && elem->counter_for_lastest_data == counter_for_lastest_data) {
                             result_branch = new Branch(elem);
                             // ✅【修复】新增这一行：将新对象交给 HOTree 管理
-                            all_branchs.push_back(result_branch);
+                            // all_branchs.push_back(result_branch);
                         }
-                    }   
+                    }
                 }
             }
             else {
@@ -298,7 +318,7 @@ Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data, int pr
                         if(elem->id == id && elem->counter_for_lastest_data == counter_for_lastest_data) {
                             result_branch = new Branch(elem);
                             // ✅【修复】新增这一行：将新对象交给 HOTree 管理
-                            all_branchs.push_back(result_branch);
+                            // all_branchs.push_back(result_branch);
                             return result_branch;
                         }
                     }   
@@ -316,6 +336,7 @@ Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data, int pr
 }
 
 Branch* HOTree::Retrieve(Client* client_, Triple*& triple) {
+    
     Branch* child_branch = nullptr;
     // 将要取回的id和该id所在的层的预测
     int level_i = triple->level;
@@ -372,6 +393,9 @@ Branch* HOTree::Retrieve(Client* client_, Triple*& triple) {
     if(id == debug_id && if_is_debug) {
         cout<<"id "<< id <<" counter have update: "<< child_branch->counter_for_lastest_data <<endl;
     }
+    if(client_->stash_.size() % Z == 0 && client_->stash_.size() != 0) {
+        Eviction(client_); 
+    }
     return child_branch;
 }
 
@@ -406,7 +430,8 @@ vector<pair<double, DataRecord>> HOTree::SearchTopK(double qx, double qy, string
     // 因为我们在 Build 里已经强制合并为单根(或少根)，这里 Retrieve 次数很少
     for (auto & triple : root) {
         // 根节点必须取回，无法避免
-        auto child_branch = Retrieve(client_, triple); 
+        auto child_branch = Retrieve(client_, triple);
+        
         
         // 计算根节点的分数
         double score = client_->CalcuTestSPaceRele(child_branch, queryBranch);
@@ -414,10 +439,6 @@ vector<pair<double, DataRecord>> HOTree::SearchTopK(double qx, double qy, string
         // 根节点已经取回了，放入 fetched_branch
         pq.push({score, triple, child_branch}); 
         
-        // Eviction 检查
-        if(client_->stash_.size() % Z == 0 && client_->stash_.size() != 0) {
-            Eviction(client_);
-        }
     }
     
     // 3. 循环搜索
@@ -478,9 +499,7 @@ vector<pair<double, DataRecord>> HOTree::SearchTopK(double qx, double qy, string
             }
             
             // 当前节点处理完毕，如果内存满了需要驱逐
-            if(client_->stash_.size() % Z == 0 && client_->stash_.size() != 0) {
-                Eviction(client_); 
-            }
+            
         }
         
         // 如果 top.fetched_branch 不为空（比如根节点），这里不需要 delete，因为 Retrieve 返回的指针可能在 stash 中管理
@@ -651,6 +670,8 @@ void HOTree::Build(vector<DataRecord>& raw_data, Client* &client) {
     // printf("Initially status is as following:");
     string temp = "After Oblivious Shuffle & Insert level: "+L;
     vec_hashtable_[L]->print_table_status(temp, client_->vector_every_level_stash_[L]);
+
+    all_branchs.clear();
 }
 
 // vector<pair<double, DataRecord>> HOTree::SearchTopK(double qx, double qy, string qText, int k, Client* client) {

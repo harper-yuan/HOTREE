@@ -44,6 +44,7 @@ void Cryptor::aes_encrypt(const std::string& plain, std::string& cipher)
 
 std::string Cryptor::aes_encrypt(const std::string& plain, int i)
 {
+    // std::string plain = padZero(plain_no_pad);
     std::string cipher;
     CryptoPP::SecByteBlock key = key_vec[i];
     CTR_Mode<AES>::Encryption encrypt_handler;
@@ -95,9 +96,6 @@ void Cryptor::aes_decrypt(const std::string& cipher_full, std::string& plain)
 
 std::string Cryptor::aes_decrypt(const std::string& cipher_full, int i)
 {   
-    if(i == -1) { // means this data blongs to client stash
-        return cipher_full;
-    }
     std::string plain;
     CryptoPP::SecByteBlock key = key_vec[i];
     if (cipher_full.length() < AES::BLOCKSIZE) {

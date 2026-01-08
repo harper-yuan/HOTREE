@@ -18,7 +18,7 @@
 
 #ifndef MY_BLOCK_SIZE
   // 默认值
-  constexpr const size_t BlockSize = 2048; 
+  constexpr const size_t BlockSize = 4096;
 #else
   // 如果 CMake 传了 MY_BLOCK_SIZE，则将其值赋给 BlockSize 变量
   constexpr const size_t BlockSize = MY_BLOCK_SIZE;
@@ -26,12 +26,12 @@
 // --- 1. 配置参数 ---
 constexpr const int MAX_SIZE = 6;        // 节点最大容量 (分支数)
 constexpr const double ALPHA = 0.5;      // 权重因子：0.5 表示空间和文本同等重要
-constexpr const int Z = 256;            // Client stash size
+constexpr const int Z = 64;            // Client stash size
 constexpr const int num_users = 1;    
 constexpr const int TEE_Z = num_users*Z;            
 constexpr const size_t cuckoo_stash_size = 20;
 // constexpr const size_t BlockSize = 4096; // padding every encrypted data to 4096 Bytes
-constexpr const int num_threads = 32; 
+constexpr const int num_threads = 8; 
 constexpr const int debug_id = -337;
 constexpr const int child_debug_id = -18;
 constexpr const int global_seed = 200;

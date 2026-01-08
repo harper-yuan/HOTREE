@@ -8,7 +8,6 @@ macro(add_benchmark source_name)
     list(APPEND benchbin ${source_name})
 endmacro()
 
-add_benchmark(initialization_vary_N)
 add_benchmark(initialization_vary_blocksize)
 add_benchmark(query_vary_k)
 add_benchmark(query_vary_N)

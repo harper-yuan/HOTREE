@@ -25,11 +25,12 @@ struct DatasetConfig {
     string data_path;
 };
 
-const int NUM_QUERIES = Z; // 样本数
+const int NUM_QUERIES = (int)pow(2,20); // 样本数
 const int FIXED_K = 1;
 
 // const vector<int> N_VALUES = {1024, 2048}; 
-const vector<int> N_VALUES = {(int)pow(2,16)};
+// const vector<int> N_VALUES = {(int)pow(2,10), (int)pow(2,12), (int)pow(2,14)};
+const vector<int> N_VALUES = {(int)pow(2,18)};
 
 // 定义四个数据集
 vector<DatasetConfig> datasets = {
@@ -42,7 +43,7 @@ vector<DatasetConfig> datasets = {
 int main() {
     string result_filename = "../exp_result/query_vary_N.csv";
     ofstream csv(result_filename);
-    csv << "Scheme,Dataset,N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize,Access,Self_Access\n";
+    csv << "Scheme,Dataset,N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize,Access,Self_Access,InitialTime_s\n";
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -70,7 +71,13 @@ int main() {
             // 构建索引
             Client* client = nullptr;
             HOTree hotree(dictionary);
+            auto init_start = std::chrono::steady_clock::now(); // 开始计时
             hotree.Build(dataset, client);
+            auto init_end = std::chrono::steady_clock::now();   // 结束计时
+            // 计算初始化时间（秒）
+            double initial_time_s = std::chrono::duration<double>(init_end - init_start).count();
+            cout<< "Init: " << initial_time_s << "s"<<endl;
+            
             client = hotree.getClient();
 
             // 选取查询
@@ -83,7 +90,7 @@ int main() {
             
             // 随机打乱
             std::shuffle(sampled_queries.begin(), sampled_queries.end(), gen);
-
+            hotree.clear_additional_oblivious_shuffle_time();
             double total_time = 0;
             long long total_rounds = 0;
             long long total_volume = 0;
@@ -113,7 +120,7 @@ int main() {
             }
 
             // 计算平均值
-            double avg_t = total_time / actual_queries;
+            double avg_t = (total_time+ hotree.compute_additional_oblivious_shuffle_time()) / actual_queries;
             double avg_r = (double)total_rounds / actual_queries;
             double avg_v = (double)total_volume / actual_queries;
             double avg_a = (double)total_counter_access / actual_queries;
@@ -129,10 +136,11 @@ int main() {
                 << avg_v << "," 
                 << BlockSize << "," 
                 << avg_a << "," 
-                << avg_as << "\n";
+                << avg_as <<"," 
+                << initial_time_s << "\n";
             
             // 打印进度
-            cout << "  [N=" << setw(5) << n << "] Time: " << fixed << setprecision(2) << avg_t << "ms" << endl;
+            cout << "  [N=" << setw(5) << n << "] Time: " << fixed << setprecision(2) << avg_t << "ms"<< " oblivious shuffle time: "<< hotree.compute_additional_oblivious_shuffle_time()<<"ms " << endl;
         }
     }
 

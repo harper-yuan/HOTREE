@@ -17,10 +17,10 @@ public:
     int max_level_; // save the label of the maximum level
     // hash seed for oblivious shuffle (assign the place according to the id). This seed need to change per shuffle, but we retain it for simplicity.
     size_t seed_shuffle_;
-    double communication_round_trip_;
-    double communication_volume_;
-    int counter_access_;
-    int counter_self_healing_access_;
+    double communication_round_trip_ = 0;
+    double communication_volume_ = 0;
+    int counter_access_ = 0;
+    int counter_self_healing_access_ = 0;
     
     std::random_device rd;          // 随机设备
     std::mt19937 gen;               // 随机数生成引擎

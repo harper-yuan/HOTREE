@@ -21,47 +21,55 @@ struct DatasetConfig {
     string data_path;
 };
 
-const int NUM_QUERIES = 1;
+const int NUM_QUERIES = 1024;
 const int FIXED_N = (int)pow(2,10); // 固定数据规模
-// const vector<int> K_VALUES = {1, 2, 3, 4, 5, 6, 7, 8};
-const vector<int> K_VALUES = {8};
+const vector<int> K_VALUES = {1, 2, 3, 4, 5, 6};
+
 vector<DatasetConfig> datasets = {
-    // {"yelp", "../../dataset/yelp/keywords_dict.txt", "../../dataset/yelp/dataset.txt"},
-    // {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
-    // {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
+    {"yelp", "../../dataset/yelp/keywords_dict.txt", "../../dataset/yelp/dataset.txt"},
+    {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
+    {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
     {"synthetic", "../../dataset/synthetic/keywords_dict.txt", "../../dataset/synthetic/dataset.txt"}
 };
+
 int main() {
     string result_filename = "../exp_result/query_vary_K.csv";
     ofstream csv(result_filename);
-    csv << "Scheme,Dataset,N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize,Access,Self_Access\n";
+    // 修改表头，增加 InitialTime_s 列
+    csv << "Scheme,Dataset,N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize,Access,Self_Access,InitialTime_s\n";
 
     std::random_device rd;
     std::mt19937 gen(rd());
 
-    // #pragma omp parallel for
-    
     for (const auto& ds : datasets) {
         cout << "\n>>> 正在测试数据集 (K变动): " << ds.name << endl;
         
+        vector<string> dictionary = LoadDictionary(ds.dict_path);
+        vector<DataRecord> data = readDataFromDataset(ds.data_path, FIXED_N);
+        vector<DataRecord> sampled_queries = readDataFromDataset(ds.data_path, FIXED_N);
+        int actual_queries = min((int)sampled_queries.size(), NUM_QUERIES);
+        if (data.empty()) continue;
+
+        // --- 记录初始化时间开始 ---
+        Client* client = nullptr;
+        HOTree hotree(dictionary);
         
+        auto init_start = std::chrono::steady_clock::now(); // 开始计时
+        hotree.Build(data, client);
+        auto init_end = std::chrono::steady_clock::now();   // 结束计时
+        
+        
+        // 计算初始化时间（秒）
+        double initial_time_s = std::chrono::duration<double>(init_end - init_start).count();
+        cout<< "Init: " << initial_time_s << "s"<<endl;
+        
+        client = hotree.getClient();
+        // --- 记录初始化时间结束 ---
 
         for (int k : K_VALUES) {
-            vector<string> dictionary = LoadDictionary(ds.dict_path);
-            vector<DataRecord> data = readDataFromDataset(ds.data_path, FIXED_N);
-            vector<DataRecord> sampled_queries = readDataFromDataset(ds.data_path, FIXED_N);
-            int actual_queries = min((int)sampled_queries.size(), NUM_QUERIES);
-            if (data.empty()) continue;
-
-            // 构建索引 (固定 N，只需构建一次)
-            Client* client = nullptr;
-            HOTree hotree(dictionary);
-            hotree.Build(data, client);
-            client = hotree.getClient();
-
             // 随机打乱以选择查询点
             std::shuffle(sampled_queries.begin(), sampled_queries.end(), gen);
-            
+            hotree.clear_additional_oblivious_shuffle_time();
             double total_time = 0;
             long long total_rounds = 0;
             long long total_volume = 0;
@@ -70,30 +78,33 @@ int main() {
 
             for (int i = 0; i < actual_queries; ++i) {
                 const auto& q = sampled_queries[i];
-                int start_rounds = client->communication_round_trip_;
-                int start_volume = client->communication_volume_;
+                double start_rounds = client->communication_round_trip_;
+                double start_volume = client->communication_volume_;
                 int start_counter_access_ = client->counter_access_;
                 int start_counter_self_healing_access = client->counter_self_healing_access_;
 
-                auto start_t = high_resolution_clock::now();
+                auto start_t = std::chrono::steady_clock::now();
                 hotree.SearchTopK(q.x_coord, q.y_coord, q.processed_text, k, client);
-                auto end_t = high_resolution_clock::now();
+                auto end_t = std::chrono::steady_clock::now();
 
-                total_time += duration_cast<microseconds>(end_t - start_t).count() / 1000.0;
+                total_time += std::chrono::duration<double, std::milli>(end_t - start_t).count();
                 total_rounds += (client->communication_round_trip_ - start_rounds);
                 total_volume += (client->communication_volume_ - start_volume);
+
                 total_counter_access += (client->counter_access_ - start_counter_access_);
                 total_counter_self_healing_acces += (client->counter_self_healing_access_ - start_counter_self_healing_access);
             }
 
-            double avg_t = total_time / actual_queries;
+            double avg_t = (total_time + hotree.compute_additional_oblivious_shuffle_time()) / actual_queries;
             double avg_r = (double)total_rounds / actual_queries;
             double avg_v = (double)total_volume / actual_queries;
             double avg_a = (double)total_counter_access / actual_queries;
             double avg_as = (double)total_counter_self_healing_acces / actual_queries;
 
-            csv << "HOTREE,"<<ds.name << "," << FIXED_N << "," << k << "," << avg_t << "," << avg_r << "," << avg_v << "," << BlockSize <<  "," << avg_a<< "," << avg_as << "\n";
-            cout << "  [K=" << setw(2) << k << "] Time: " << fixed << setprecision(2) << avg_t << "ms" << endl;
+            // 在 CSV 写入行末尾增加 initial_time_s
+            csv << "HOTREE," << ds.name << "," << FIXED_N << "," << k << "," << avg_t << "," << avg_r << "," << avg_v << "," << BlockSize << "," << avg_a << "," << avg_as << "," << initial_time_s << "\n";
+            
+            cout << "  [K=" << setw(2) << k << "] Time: " << fixed << setprecision(2) << avg_t << "ms" << " oblivious shuffle time: "<< hotree.compute_additional_oblivious_shuffle_time() << "ms" << endl;
         }
     }
     csv.close();

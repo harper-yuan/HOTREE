@@ -2,6 +2,7 @@
 #include <vector>
 #include <cstddef>
 #include <omp.h>
+#include <chrono>
 #include "Branch.h"
 #include "define.h"
 #include "client.h"
@@ -35,9 +36,13 @@ public:
     std::vector<Entry> table;
     std::vector<Branch*> stash; // 修改：存储指针
     const size_t STASH_CAPACITY = cuckoo_stash_size;
-
     size_t current_count;
     int HOTREE_level_;
+    double single_shuffle_round_trips;
+    double single_shuffle_commucations;
+    double single_shuffle_times;
+    int shuffle_count;
+    bool shuffle_tested_flag = false;
 
     static const int MAX_KICKS = 500;
 
