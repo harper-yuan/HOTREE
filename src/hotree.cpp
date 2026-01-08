@@ -7,6 +7,56 @@ void HOTree::print_stash() {
     }
 }
 
+#include <unordered_set>
+
+void HOTree::PerformGarbageCollection(int target_level) {
+    // 1. 只有在最后一层（最大层）才进行清理
+    if (target_level != client_->max_level_) return;
+
+    if (if_is_debug) {
+        std::cout << "[GC] Start Garbage Collection. Before: " << all_branchs.size() << " objects." << std::endl;
+    }
+
+    // 2. [Mark 阶段] 收集所有“存活”的指针
+    // 存活的指针只存在于：该层的 Hash Table 和该层的 Stash
+    std::unordered_set<Branch*> active_pointers;
+    
+    // 收集 Table 中的指针
+    for (const auto& entry : vec_hashtable_[target_level]->table) {
+        if (entry.occupied && entry.branch != nullptr) {
+            active_pointers.insert(entry.branch);
+        }
+    }
+    
+    // 收集 Stash 中的指针 (注意：Eviction后，Stash已经移交回 client_->vector_every_level_stash_)
+    for (auto* ptr : client_->vector_every_level_stash_[target_level]) {
+        if (ptr != nullptr) {
+            active_pointers.insert(ptr);
+        }
+    }
+
+    // 3. [Sweep 阶段] 遍历全局池，保留活的，删除死的
+    std::vector<Branch*> survivors;
+    survivors.reserve(active_pointers.size());
+
+    for (Branch* ptr : all_branchs) {
+        // 如果指针在存活集合里，保留
+        if (active_pointers.find(ptr) != active_pointers.end()) {
+            survivors.push_back(ptr);
+        } 
+        // 否则，它是 Compaction 丢弃的旧版本或重复数据，彻底删除！
+        else {
+            delete ptr; 
+        }
+    }
+
+    // 4. 更新 all_branchs 为幸存者列表
+    all_branchs = std::move(survivors);
+
+    if (if_is_debug) {
+        std::cout << "[GC] End Garbage Collection. After: " << all_branchs.size() << " objects." << std::endl;
+    }
+}
 
 void HOTree::clear_additional_oblivious_shuffle_time() {
     for(int i = client_->min_level_; i <= client_->max_level_; i++) {
@@ -18,10 +68,8 @@ double HOTree::compute_additional_oblivious_shuffle_time() {
     for(int i = client_->min_level_; i <= client_->max_level_; i++) {
         // 计算当前层级的开销
         double current_level_time = (double)vec_hashtable_[i]->shuffle_count * vec_hashtable_[i]->single_shuffle_times;
-
         result += current_level_time;
     }
-    
     return result;
 }
 
@@ -204,7 +252,7 @@ void HOTree::Eviction(Client* client) {
     
     /*-------------------------oblivious shuffle-------------------------------*/
     vec_hashtable_[target_level]->oblivious_shuffle_and_insert(all_shuffled_branchs, branchs_level_belong_to, client); // this fuction includes updating hash seed. 
-
+    
     /*-------------------------update the client stash for cuckoo table stash of target_level-------------------------------*/
     for(int i = 0; i < vec_hashtable_[target_level]->stash.size(); i++) {
         // move the stash to client, stash is so small that client is easy to save
@@ -214,6 +262,10 @@ void HOTree::Eviction(Client* client) {
     }
     vec_hashtable_[target_level]->stash.clear();
     
+    if(target_level == client->max_level_) {
+        //This function promptly frees variables to prevent memory explosion. However, it incurs a performance overhead
+        PerformGarbageCollection(target_level);
+    }
     if(if_is_debug) {
         for(int level_i = client_->min_level_; level_i <= client_->max_level_; level_i++) {
         if(!client_->vec_hotree_level_i_is_empty_[level_i]) {
@@ -254,7 +306,7 @@ Branch* HOTree::Access(uint64_t id, int counter_for_lastest_data, int level_i) {
                         if(elem->id == id && elem->counter_for_lastest_data == counter_for_lastest_data) {
                             result_branch = new Branch(elem);
                             // ✅【修复】新增这一行：将新对象交给 HOTree 管理
-                            // all_branchs.push_back(result_branch);
+                            all_branchs.push_back(result_branch);
                         }
                     }
                 }
@@ -318,7 +370,7 @@ Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data, int pr
                         if(elem->id == id && elem->counter_for_lastest_data == counter_for_lastest_data) {
                             result_branch = new Branch(elem);
                             // ✅【修复】新增这一行：将新对象交给 HOTree 管理
-                            // all_branchs.push_back(result_branch);
+                            all_branchs.push_back(result_branch);
                             return result_branch;
                         }
                     }   
@@ -671,7 +723,6 @@ void HOTree::Build(vector<DataRecord>& raw_data, Client* &client) {
     string temp = "After Oblivious Shuffle & Insert level: "+L;
     vec_hashtable_[L]->print_table_status(temp, client_->vector_every_level_stash_[L]);
 
-    all_branchs.clear();
 }
 
 // vector<pair<double, DataRecord>> HOTree::SearchTopK(double qx, double qy, string qText, int k, Client* client) {

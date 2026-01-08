@@ -29,7 +29,7 @@ public:
     Branch* Retrieve(Client* client_, Triple*& triple);
     Branch* Access(uint64_t id, int counter_for_lastest_data, int level_i);
     Branch* Self_healing_Access(int id, int counter_for_lastest_data, int prediction_level);
-
+    void PerformGarbageCollection(int target_level);
 
     // for debug
     std::vector<double> GetTextWeight(std::string text);

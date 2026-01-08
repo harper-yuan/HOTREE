@@ -24,19 +24,16 @@ struct DatasetConfig {
     string dict_path;
     string data_path;
 };
-
-const int NUM_QUERIES = (int)pow(2,20); // 样本数
 const int FIXED_K = 1;
 
-// const vector<int> N_VALUES = {1024, 2048}; 
-// const vector<int> N_VALUES = {(int)pow(2,10), (int)pow(2,12), (int)pow(2,14)};
-const vector<int> N_VALUES = {(int)pow(2,18)};
+const vector<int> N_VALUES = {(int)pow(2,10), (int)pow(2,12), (int)pow(2,14), (int)pow(2,16), (int)pow(2,18), (int)pow(2,20)};
+// const vector<int> N_VALUES = {(int)pow(2,two_power)};
 
 // 定义四个数据集
 vector<DatasetConfig> datasets = {
-    // {"yelp",       "../../dataset/yelp/keywords_dict.txt",       "../../dataset/yelp/dataset.txt"},
-    // {"tweets",     "../../dataset/tweets/keywords_dict.txt",     "../../dataset/tweets/dataset.txt"},
-    // {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
+    {"yelp",       "../../dataset/yelp/keywords_dict.txt",       "../../dataset/yelp/dataset.txt"},
+    {"tweets",     "../../dataset/tweets/keywords_dict.txt",     "../../dataset/tweets/dataset.txt"},
+    {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
     {"synthetic",  "../../dataset/synthetic/keywords_dict.txt",  "../../dataset/synthetic/dataset.txt"}
 };
 
@@ -55,6 +52,8 @@ int main() {
         cout << "\n>>> 正在测试数据集: " << ds.name << endl;
 
         for (int n : N_VALUES) {
+            // Since each query leads to multiple accesses, this is sufficient to ensure at least N accesses
+            const int NUM_QUERIES = (int)(n / log2(n));
             // 加载字典
             vector<string> dictionary = LoadDictionary(ds.dict_path);
             if (dictionary.empty()) {
@@ -102,8 +101,8 @@ int main() {
             for (int i = 0; i < actual_queries; ++i) {
                 const auto& q = sampled_queries[i];
 
-                int start_rounds = client->communication_round_trip_;
-                int start_volume = client->communication_volume_;
+                double start_rounds = client->communication_round_trip_;
+                double start_volume = client->communication_volume_;
                 int start_counter_access_ = client->counter_access_;
                 int start_counter_self_healing_access = client->counter_self_healing_access_;
 

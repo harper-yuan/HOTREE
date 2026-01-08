@@ -20,15 +20,14 @@ struct DatasetConfig {
     string dict_path;
     string data_path;
 };
-
-const int NUM_QUERIES = 1024;
-const int FIXED_N = (int)pow(2,10); // 固定数据规模
+int two_power = 16;
+const int FIXED_N = (int)pow(2,two_power); // 固定数据规模
 const vector<int> K_VALUES = {1, 2, 3, 4, 5, 6};
 
 vector<DatasetConfig> datasets = {
-    {"yelp", "../../dataset/yelp/keywords_dict.txt", "../../dataset/yelp/dataset.txt"},
-    {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
-    {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
+    // {"yelp", "../../dataset/yelp/keywords_dict.txt", "../../dataset/yelp/dataset.txt"},
+    // {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
+    // {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
     {"synthetic", "../../dataset/synthetic/keywords_dict.txt", "../../dataset/synthetic/dataset.txt"}
 };
 
@@ -43,32 +42,39 @@ int main() {
 
     for (const auto& ds : datasets) {
         cout << "\n>>> 正在测试数据集 (K变动): " << ds.name << endl;
-        
-        vector<string> dictionary = LoadDictionary(ds.dict_path);
-        vector<DataRecord> data = readDataFromDataset(ds.data_path, FIXED_N);
-        vector<DataRecord> sampled_queries = readDataFromDataset(ds.data_path, FIXED_N);
-        int actual_queries = min((int)sampled_queries.size(), NUM_QUERIES);
-        if (data.empty()) continue;
-
-        // --- 记录初始化时间开始 ---
-        Client* client = nullptr;
-        HOTree hotree(dictionary);
-        
-        auto init_start = std::chrono::steady_clock::now(); // 开始计时
-        hotree.Build(data, client);
-        auto init_end = std::chrono::steady_clock::now();   // 结束计时
-        
-        
-        // 计算初始化时间（秒）
-        double initial_time_s = std::chrono::duration<double>(init_end - init_start).count();
-        cout<< "Init: " << initial_time_s << "s"<<endl;
-        
-        client = hotree.getClient();
-        // --- 记录初始化时间结束 ---
-
+    
         for (int k : K_VALUES) {
+            const int NUM_QUERIES = (int)(pow(2, two_power) / (two_power*k)); // 2^18
+            vector<DataRecord> sampled_queries = readDataFromDataset(ds.data_path, NUM_QUERIES);
+            int actual_queries = min((int)sampled_queries.size(), NUM_QUERIES);
             // 随机打乱以选择查询点
             std::shuffle(sampled_queries.begin(), sampled_queries.end(), gen);
+
+
+            vector<string> dictionary = LoadDictionary(ds.dict_path);
+            vector<DataRecord> data = readDataFromDataset(ds.data_path, FIXED_N);
+            
+            
+            if (data.empty()) continue;
+
+            // --- 记录初始化时间开始 ---
+            Client* client = nullptr;
+            HOTree hotree(dictionary);
+            
+            auto init_start = std::chrono::steady_clock::now(); // 开始计时
+            hotree.Build(data, client);
+            auto init_end = std::chrono::steady_clock::now();   // 结束计时
+            
+            
+            // 计算初始化时间（秒）
+            double initial_time_s = std::chrono::duration<double>(init_end - init_start).count();
+            cout<< "Init: " << initial_time_s << "s"<<endl;
+            
+            client = hotree.getClient();
+            // --- 记录初始化时间结束 ---
+
+        
+            
             hotree.clear_additional_oblivious_shuffle_time();
             double total_time = 0;
             long long total_rounds = 0;
@@ -76,6 +82,7 @@ int main() {
             long long total_counter_access =  0;
             long long total_counter_self_healing_acces = 0;
 
+            // Since each query leads to multiple accesses, this is sufficient to ensure at least N accesses
             for (int i = 0; i < actual_queries; ++i) {
                 const auto& q = sampled_queries[i];
                 double start_rounds = client->communication_round_trip_;
