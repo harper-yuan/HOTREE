@@ -1,0 +1,101 @@
+#include "Enclave_t.h" // 自动生成的
+#include "client.h"    // 复用原来的头文件，但宏定义要隔离
+#include <algorithm>
+#include <vector>
+
+// 这是一个运行在 Enclave 内部的 Wrapper 类或直接复用原代码
+// 这里假设你把原 Client 类改名为 EnclaveClient 放在 Enclave 内部
+class EnclaveClient {
+    // ... 原本 Client 的所有成员变量 (cryptor_, stash_ 等) ...
+    // ... 原本 Client 的所有逻辑代码 ...
+public:
+    // 修改 ObliviousMergeSplit 以适配 C 风格数组
+    void ObliviousMergeSplit_Internal(
+        void** in_0, size_t size_0,
+        void** in_1, size_t size_1,
+        void** out_0, // 输出数组
+        void** out_1, // 输出数组
+        void* app_dummy_ptr, // App 传进来的 Dummy 节点地址
+        int level_index, int num_levels_shuffle, int HOTREE_level
+    ) {
+        // 1. 构建临时 vector 指向 App 内存中的对象
+        // 注意：这里 vector 存的是 Branch*，指向 App 堆内存
+        std::vector<Branch*> bucket_in_0((Branch**)in_0, (Branch**)in_0 + size_0);
+        std::vector<Branch*> bucket_in_1((Branch**)in_1, (Branch**)in_1 + size_1);
+
+        std::vector<Branch*> pool;
+        pool.reserve(size_0 + size_1);
+
+        // 2. 解密 (直接操作 App 内存！)
+        // 警告：OpenMP 在 SGX 中默认不可用，需移除或替换为单线程循环
+        for(auto* s : bucket_in_0) {
+             if (s != nullptr && !s->is_dummy_for_shuffle) {
+                 // cryptor_ 在 Enclave 内，s->trueData 在 App 内
+                 // 直接读写 App 内存，速度最快
+                 s->trueData = cryptor_->aes_decrypt(s->trueData, HOTREE_level);
+                 pool.push_back(s);
+             }
+        }
+        for(auto* s : bucket_in_1) {
+             if (s != nullptr && !s->is_dummy_for_shuffle) {
+                 s->trueData = cryptor_->aes_decrypt(s->trueData, HOTREE_level);
+                 pool.push_back(s);
+             }
+        }
+
+        // 3. 排序
+        std::sort(pool.begin(), pool.end(), [](const Branch* a, const Branch* b) {
+            if (a->id != b->id) return a->id < b->id;
+            return a->counter_for_lastest_data > b->counter_for_lastest_data;
+        });
+
+        // 4. 加密
+        for(auto* s : pool) {
+            s->trueData = cryptor_->aes_encrypt(s->trueData, HOTREE_level);
+        }
+
+        // 5. 输出写回 App 提供的数组
+        // 注意：不能 push_back，只能按索引赋值，因为 out_0 是裸指针数组
+        // 也不要 new Dummy，直接用 app_dummy_ptr
+        
+        size_t Z = 64; // 假设 Z 是常量，或从某处获取
+        // 填充 bucket 0
+        for(size_t i=0; i<Z; ++i) {
+            if(i < pool.size()) out_0[i] = pool[i];
+            else out_0[i] = app_dummy_ptr; // 指向 App 的 Dummy
+        }
+        // 填充 bucket 1
+        for(size_t i=0; i<Z; ++i) {
+            size_t idx = Z + i;
+            if(idx < pool.size()) out_1[i] = pool[idx];
+            else out_1[i] = app_dummy_ptr;
+        }
+    }
+};
+
+// --- ECall 实现 ---
+
+void* ecall_create_client(int L, uint32_t seed) {
+    // 在 Enclave 堆上创建对象
+    EnclaveClient* obj = new EnclaveClient(L); 
+    // obj->gen.seed(seed); // 如果需要传递种子
+    return (void*)obj;
+}
+
+void ecall_destroy_client(void* client_ptr) {
+    EnclaveClient* obj = (EnclaveClient*)client_ptr;
+    delete obj;
+}
+
+void ecall_oblivious_merge_split(
+    void* client_ptr,
+    void** in_0, size_t size_0,
+    void** in_1, size_t size_1,
+    void** out_0,
+    void** out_1,
+    void* app_dummy_ptr,
+    int level_index, int num_levels_shuffle, int HOTREE_level
+) {
+    EnclaveClient* obj = (EnclaveClient*)client_ptr;
+    obj->ObliviousMergeSplit_Internal(in_0, size_0, in_1, size_1, out_0, out_1, app_dummy_ptr, level_index, num_levels_shuffle, HOTREE_level);
+}
