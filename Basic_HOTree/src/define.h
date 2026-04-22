@@ -26,7 +26,7 @@
 // --- 1. 配置参数 ---
 constexpr const int MAX_SIZE = 6;        // 节点最大容量 (分支数)
 constexpr const double ALPHA = 0.5;      // 权重因子：0.5 表示空间和文本同等重要
-constexpr const int Z = 512;            // Client stash size
+constexpr const int Z = 512*20;            // Client stash size
 constexpr const int num_users = 1;    
 constexpr const int TEE_Z = Z;            
 constexpr const size_t cuckoo_stash_size = 20;

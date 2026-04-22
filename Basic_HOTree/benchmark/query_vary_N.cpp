@@ -33,8 +33,8 @@ const vector<int> N_VALUES = {(int)pow(2,10), (int)pow(2,12), (int)pow(2,14)};
 // 定义四个数据集
 vector<DatasetConfig> datasets = {
     {"yelp", "../../dataset/yelp/keywords_dict.txt", "../../dataset/yelp/dataset.txt"},
-    // {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
-    // {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
+    {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
+    {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
 };
 
 int main() {
