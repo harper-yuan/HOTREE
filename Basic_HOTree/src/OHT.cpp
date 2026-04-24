@@ -7,10 +7,13 @@
 CuckooTable::CuckooTable(size_t initial_size, int HOTREE_level) : current_count(0) {
     HOTREE_level_ = HOTREE_level;
     shuffle_count = 0;
-    table.resize(initial_size);
+    
+    // 修改：确保初始化的大小一定是 Z 的倍数
+    table.resize(get_aligned_size(initial_size));
     
     stash.reserve(STASH_CAPACITY);
 }
+
 
 // 哈希函数保持不变
 size_t CuckooTable::hash(uint64_t id, size_t seed) const {
@@ -34,12 +37,14 @@ std::vector<Branch*> CuckooTable::find_hotree(uint64_t id, size_t place1, size_t
 
 Branch* CuckooTable::find(uint64_t id, uint64_t counter_for_lastest_data, Client* client) {
     uint64_t id_and_counter = combine_unique(id, counter_for_lastest_data);
+    
+    // 修改：获取 Bin 内的 p1 和 p2
+    auto [p1, p2] = get_p1_p2(id_and_counter, client);
+
     // 1. Table Lookups
-    size_t p1 = client->compute_hash1(id_and_counter, HOTREE_level_, table.size());
     if (table[p1].occupied && table[p1].branch != nullptr && table[p1].branch->id == id && table[p1].branch->counter_for_lastest_data == counter_for_lastest_data) {
         return table[p1].branch;
     }
-    size_t p2 = client->compute_hash2(id_and_counter, HOTREE_level_, table.size());
     if (table[p2].occupied && table[p2].branch != nullptr && table[p2].branch->id == id && table[p2].branch->counter_for_lastest_data == counter_for_lastest_data) {
         return table[p2].branch;
     }
@@ -51,12 +56,32 @@ Branch* CuckooTable::find(uint64_t id, uint64_t counter_for_lastest_data, Client
     return nullptr;
 }
 
+// Branch* CuckooTable::find(uint64_t id, uint64_t counter_for_lastest_data, Client* client) {
+//     uint64_t id_and_counter = combine_unique(id, counter_for_lastest_data);
+//     // 1. Table Lookups
+//     size_t p1 = client->compute_hash1(id_and_counter, HOTREE_level_, table.size());
+//     if (table[p1].occupied && table[p1].branch != nullptr && table[p1].branch->id == id && table[p1].branch->counter_for_lastest_data == counter_for_lastest_data) {
+//         return table[p1].branch;
+//     }
+//     size_t p2 = client->compute_hash2(id_and_counter, HOTREE_level_, table.size());
+//     if (table[p2].occupied && table[p2].branch != nullptr && table[p2].branch->id == id && table[p2].branch->counter_for_lastest_data == counter_for_lastest_data) {
+//         return table[p2].branch;
+//     }
+
+//     // 2. Stash Lookup
+//     for (auto& item : stash) {
+//         if (item != nullptr && item->id == id && item->counter_for_lastest_data == counter_for_lastest_data) return item;
+//     }
+//     return nullptr;
+// }
+
 void CuckooTable::insert(Branch* branch, Client* client) {
     if ((current_count + stash.size()) >= table.size()) {
         rehash(table.size() * 2, client);
     }
     insert_internal(branch, client);
 }
+
 
 void CuckooTable::insert_internal(Branch* item, Client* client) {
     // 检查是否已存在（避免重复插入指针）
@@ -66,7 +91,11 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
 
     static std::mt19937 rng(global_seed); 
     for (int i = 0; i < MAX_KICKS; ++i) {
-        size_t p1 = client->compute_hash1(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
+        uint64_t id_and_counter = combine_unique(item->id, item->counter_for_lastest_data);
+        
+        // 修改：使用统一的函数获取 Bin 内的两个位置
+        auto [p1, p2] = get_p1_p2(id_and_counter, client);
+
         if (!table[p1].occupied) {
             table[p1].branch = item;
             table[p1].occupied = true;
@@ -74,7 +103,6 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
             return;
         }
 
-        size_t p2 = client->compute_hash2(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
         if (!table[p2].occupied) {
             table[p2].branch = item;
             table[p2].occupied = true;
@@ -82,14 +110,16 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
             return;
         }
 
-        // 随机踢出一个指针
+        // 随机踢出一个指针 (此时踢出只会在该 Bin 内部的 p1 和 p2 之间发生)
         bool kick_p1 = (rng() % 2) == 0;
         size_t victim_pos = kick_p1 ? p1 : p2;
         std::swap(item, table[victim_pos].branch);
     }
-    size_t p1 = client->compute_hash1(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
-    size_t p2 = client->compute_hash2(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
+    
+    // 如果达到了 MAX_KICKS 还没插入成功，放入全局 stash
     if(if_is_debug) {
+        uint64_t debug_id_counter = combine_unique(item->id, item->counter_for_lastest_data);
+        auto [p1, p2] = get_p1_p2(debug_id_counter, client);
         if(table[p1].branch!=nullptr && table[p1].branch->id == debug_id) {
             std::cout<<"In insert id "<< table[p1].branch->id <<" level "<<HOTREE_level_ <<" p1: "<<p1 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< table[p1].branch->counter_for_lastest_data<<std::endl;    
         }
@@ -105,9 +135,62 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
         }
         return; 
     }
+    
+    // 兜底扩容
     rehash(table.size() * 2, client);
     insert_internal(item, client);
 }
+
+// void CuckooTable::insert_internal(Branch* item, Client* client) {
+//     // 检查是否已存在（避免重复插入指针）
+//     if (find(item->id, item->counter_for_lastest_data, client) != nullptr) {
+//         return; 
+//     }
+
+//     static std::mt19937 rng(global_seed); 
+//     for (int i = 0; i < MAX_KICKS; ++i) {
+//         size_t p1 = client->compute_hash1(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
+//         if (!table[p1].occupied) {
+//             table[p1].branch = item;
+//             table[p1].occupied = true;
+//             current_count++;
+//             return;
+//         }
+
+//         size_t p2 = client->compute_hash2(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
+//         if (!table[p2].occupied) {
+//             table[p2].branch = item;
+//             table[p2].occupied = true;
+//             current_count++;
+//             return;
+//         }
+
+//         // 随机踢出一个指针
+//         bool kick_p1 = (rng() % 2) == 0;
+//         size_t victim_pos = kick_p1 ? p1 : p2;
+//         std::swap(item, table[victim_pos].branch);
+//     }
+//     size_t p1 = client->compute_hash1(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
+//     size_t p2 = client->compute_hash2(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
+//     if(if_is_debug) {
+//         if(table[p1].branch!=nullptr && table[p1].branch->id == debug_id) {
+//             std::cout<<"In insert id "<< table[p1].branch->id <<" level "<<HOTREE_level_ <<" p1: "<<p1 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< table[p1].branch->counter_for_lastest_data<<std::endl;    
+//         }
+//         if(table[p2].branch!=nullptr && table[p2].branch->id == debug_id) {
+//             std::cout<<"In insert id "<< table[p2].branch->id <<" level "<<HOTREE_level_ <<" p2: "<<p2 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< table[p2].branch->counter_for_lastest_data<<std::endl;    
+//         }
+//     }
+
+//     if (stash.size() < STASH_CAPACITY) {
+//         stash.push_back(item);
+//         if(item->id == debug_id && if_is_debug) {
+//             std::cout<<"In insert id "<< item->id <<" level "<<HOTREE_level_ <<" stash weth seed"<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< item->counter_for_lastest_data<<std::endl;
+//         }
+//         return; 
+//     }
+//     rehash(table.size() * 2, client);
+//     insert_internal(item, client);
+// }
 
 void CuckooTable::rehash(size_t new_size, Client* client) {
     std::vector<Entry> old_table = std::move(table);
@@ -162,7 +245,7 @@ std::vector<Branch*> CuckooTable::oblivious_tight_compaction(std::vector<Branch*
 
 void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_elements_before_otc, std::vector<int> branchs_level_belong_to, Client* client) {
     // 1. 初始化基础状态
-    table.assign(pow(2, HOTREE_level_), Entry());
+    table.assign(get_aligned_size(pow(2, HOTREE_level_)), Entry());
     stash.clear();
     current_count = 0;
     client->UpdateSeed(HOTREE_level_);
@@ -331,7 +414,7 @@ void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_element
 
     // 7. 最终插入阶段
     // 此时结果在 buffer_curr 中 (因为最后一次循环做了 swap)
-    table.assign(pow(2, HOTREE_level_), Entry());
+    table.assign(get_aligned_size(pow(2, HOTREE_level_)), Entry());
     stash.clear();
     current_count = 0;
     client->UpdateSeed(HOTREE_level_);
@@ -446,13 +529,21 @@ void CuckooTable::oblivious_shuffle_and_insert_last_level(std::vector<Branch*>& 
 
     // 6. 最终插入与去重阶段
     // 此时结果存储在 buffer_curr 中
-    table.assign(pow(2, HOTREE_level_), Entry());
+    table.assign(get_aligned_size(pow(2, HOTREE_level_)), Entry());
     stash.clear();
     current_count = 0;
     client->UpdateSeed(HOTREE_level_);
 
     int curr_id = 2147483647; // Sentinel value
 
+
+    /*The oblivious shuffle has already clustered all data belonging to the same bin together. 
+    Therefore, the client can retrieve Z data items at a time and insert each item to cuckoo hash table. 
+    For the local implementation of the cuckoo hash eviction operation, we insert elements one by one. 
+    This approach simplifies the implementation because there is no need to initialize multiple cuckoo hash tables. 
+    However, note that our implementation still guarantees the properties described in the paper, since during each insertion, 
+    the result of our hash computation is guaranteed to fall within a specific bin (see function get_p1_p2(uint64_t id_and_counter, Client* client)). 
+    Thus, we ensure that every element completes its eviction process within its assigned bin.*/
     for(Branch* branch : buffer_curr) {
         if(branch != nullptr && !branch->is_dummy_for_shuffle) {
             // 【保留】原有的去重逻辑
@@ -471,15 +562,13 @@ void CuckooTable::oblivious_shuffle_and_insert_last_level(std::vector<Branch*>& 
             }                
         }
     }
-
-    // 资源自动清理：
-    // dummy_arena 和 buffer vectors 会在此处析构
-    // 无需手动 delete 循环
+    client->communication_round_trip_ += buffer_curr.size() / Z;
+    client->communication_volume_ += buffer_curr.size() * B; 
 }
 
 // void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_elements_before_otc, std::vector<int> branchs_level_belong_to, Client* client) {
 //     // 1. 初始化基础状态
-//     table.assign(pow(2, HOTREE_level_), Entry());
+//     table.assign(get_aligned_size(pow(2, HOTREE_level_)), Entry());
 //     stash.clear();
 //     current_count = 0;
 //     client->UpdateSeed(HOTREE_level_);
@@ -642,7 +731,7 @@ void CuckooTable::oblivious_shuffle_and_insert_last_level(std::vector<Branch*>& 
 
 //     // 6. 最终插入阶段
 //     // 重新初始化表格以准备插入混淆后的元素 [cite: 353]
-//     table.assign(pow(2, HOTREE_level_), Entry());
+//     table.assign(get_aligned_size(pow(2, HOTREE_level_)), Entry());
 //     stash.clear();
 //     current_count = 0;
 //     client->UpdateSeed(HOTREE_level_);

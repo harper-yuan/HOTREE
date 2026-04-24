@@ -292,9 +292,9 @@ Branch* HOTree::Access(uint64_t id, int counter_for_lastest_data, int level_i) {
         }
         else {
             if(i == level_i) {
-                size_t p1 = client_->compute_hash1(id_counter_combine, i, vec_hashtable_[i]->getTableCapacity());
-                size_t p2 = client_->compute_hash2(id_counter_combine, i, vec_hashtable_[i]->getTableCapacity());
-
+                // size_t p1 = client_->compute_hash1(id_counter_combine, i, vec_hashtable_[i]->getTableCapacity());
+                // size_t p2 = client_->compute_hash2(id_counter_combine, i, vec_hashtable_[i]->getTableCapacity());
+                auto [p1, p2] = vec_hashtable_[i]->get_p1_p2(id_counter_combine, client_);
                 if(id == debug_id && if_is_debug) {
                     std::cout<<"In search level"<< level_i <<" p1: "<<p1 << " seed: "<<client_->vec_seed1_[level_i]<<" table size"<< vec_hashtable_[i]->getTableCapacity()<<std::endl;
                 }
@@ -312,8 +312,8 @@ Branch* HOTree::Access(uint64_t id, int counter_for_lastest_data, int level_i) {
                 }
             }
             else {
-                size_t p1 = client_->getRandomIndex(vec_hashtable_[i]->getTableCapacity());
-                size_t p2 = client_->getRandomIndex(vec_hashtable_[i]->getTableCapacity());
+                size_t random = 2;
+                auto [p1, p2] = vec_hashtable_[i]->get_p1_p2(id_counter_combine + random, client_); //random access
                 client_->communication_volume_ += BlockSize*2; // two blocks
                 auto vec_temp_branch = vec_hashtable_[i]->find_hotree(id, p1, p2);
             }
@@ -355,8 +355,9 @@ Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data, int pr
         }
         else {
             if(result_branch == nullptr) {
-                size_t p1 = client_->compute_hash1(combine_unique(id, counter_for_lastest_data), i, vec_hashtable_[i]->getTableCapacity());
-                size_t p2 = client_->compute_hash2(combine_unique(id, counter_for_lastest_data), i, vec_hashtable_[i]->getTableCapacity());
+                // size_t p1 = client_->compute_hash1(combine_unique(id, counter_for_lastest_data), i, vec_hashtable_[i]->getTableCapacity());
+                // size_t p2 = client_->compute_hash2(combine_unique(id, counter_for_lastest_data), i, vec_hashtable_[i]->getTableCapacity());
+                auto [p1, p2] = vec_hashtable_[i]->get_p1_p2(combine_unique(id, counter_for_lastest_data), client_);
 
                 if(id == debug_id && if_is_debug) {
                     std::cout<<"In self heal search level"<< i <<" p1: "<<p1 << " seed: "<<client_->vec_seed1_[i]<<" table size"<< vec_hashtable_[i]->getTableCapacity()<<std::endl;

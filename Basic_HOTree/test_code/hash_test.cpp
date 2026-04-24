@@ -171,6 +171,7 @@ BOOST_AUTO_TEST_CASE(test_oblivious_shuffle_correctness_and_perf) {
 
     CuckooTable cuckooTable(data.size(), 0); 
     Client* client = new Client(5);
+    double comm_vol_mb = (double)client->communication_volume_;
     std::vector<Branch*> branch_pool;
 
     // 1. 插入数据
@@ -213,7 +214,7 @@ BOOST_AUTO_TEST_CASE(test_oblivious_shuffle_correctness_and_perf) {
     BOOST_CHECK_EQUAL(found_count, unique_ids.size());
 
     // 4. 性能报告
-    double comm_vol_mb = (double)client->communication_volume_ / (1024.0 * 1024.0);
+    comm_vol_mb = (double)(client->communication_volume_ - comm_vol_mb) / (1024.0 * 1024.0);
     double comm_round_trips = (double)client->communication_round_trip_;
     std::cout << "Shuffle Time    : " << duration << " ms" << std::endl;
     std::cout << "Comm Volume     : " << comm_vol_mb << " MB" << std::endl;

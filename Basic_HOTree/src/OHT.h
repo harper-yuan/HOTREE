@@ -28,6 +28,37 @@ public:
     std::vector<Branch*> oblivious_tight_compaction(std::vector<Branch*> all_elements, std::vector<int> branchs_level_belong_to, Client* client);
 
 public:
+    /*----------------------------------------for bucket hash--------------------------------------*/    
+    // 强制表大小是 Z 的倍数
+    inline size_t get_aligned_size(size_t s) const {
+        return s < Z ? Z : ((s + Z - 1) / Z) * Z;
+    }
+
+    // 核心修改：计算元素所在的 Bin，并返回该 Bin 内部的 p1 和 p2
+    inline std::pair<size_t, size_t> get_p1_p2(uint64_t id_and_counter, Client* client) const {
+        size_t B = table.size() / Z; // Bin 的总数
+        if (B == 0) B = 1;
+
+        // 1. 使用 hash1 映射到全局 table，用于确定属于哪个 Bin
+        size_t global_h1 = client->compute_hash1(id_and_counter, HOTREE_level_, table.size());
+        size_t bin_id = global_h1 / Z;
+
+        // 2. p1 直接就是 global_h1 (即 bin_id * Z + (global_h1 % Z))
+        size_t p1 = global_h1;
+
+        // 3. 使用 hash2 在同一个 Bin 内计算 p2
+        size_t local_h2 = client->compute_hash2(id_and_counter, HOTREE_level_, Z);
+        size_t p2 = bin_id * Z + local_h2;
+
+        // 避免 p1 和 p2 落在同一个槽位导致无效的踢出死循环
+        if (p1 == p2) {
+            p2 = bin_id * Z + ((local_h2 + 1) % Z);
+        }
+
+        return {p1, p2};
+    }
+    /*----------------------------------------for bucket hash--------------------------------------*/    
+
     struct Entry {
         Branch* branch = nullptr; // 修改：存储指针，仅占 8 字节
         bool occupied = false;

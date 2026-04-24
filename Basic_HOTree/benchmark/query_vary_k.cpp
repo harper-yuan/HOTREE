@@ -20,9 +20,10 @@ struct DatasetConfig {
     string dict_path;
     string data_path;
 };
-int two_power = 14;
+int two_power = 18;
 const int FIXED_N = (int)pow(2,two_power); // 固定数据规模
-const vector<int> K_VALUES = {1, 2, 3, 4, 5, 6};
+// const vector<int> K_VALUES = {1, 2, 3, 4, 5, 6};
+const vector<int> K_VALUES = {1};
 
 vector<DatasetConfig> datasets = {
     {"yelp", "../../dataset/yelp/keywords_dict.txt", "../../dataset/yelp/dataset.txt"},
