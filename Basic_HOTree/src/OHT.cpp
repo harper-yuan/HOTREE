@@ -316,8 +316,8 @@ void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_element
     on the layer where the original data is located. All decrypted data is encrypted 
     using the key corresponding to the new layer, but for the sake of concise and easy to 
     understand code, we will decrypt it here. Note that this does not affect performance. */
-    omp_set_num_threads(num_threads);
-    #pragma omp parallel for schedule(static)
+    // omp_set_num_threads(num_threads);
+    // #pragma omp parallel for schedule(static)
     for(int i = 0; i < (int)all_elements.size(); i++) {
         all_elements[i]->trueData = client->cryptor_->aes_decrypt(all_elements[i]->trueData, branchs_level_belong_to[i]);
     }
@@ -419,11 +419,21 @@ void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_element
     current_count = 0;
     client->UpdateSeed(HOTREE_level_);
 
+
+    /*The oblivious shuffle has already clustered all data belonging to the same bin together. 
+    Therefore, the client can retrieve Z data items at a time and insert each item to cuckoo hash table. 
+    For the local implementation of the cuckoo hash eviction operation, we insert elements one by one. 
+    This approach simplifies the implementation because there is no need to initialize multiple cuckoo hash tables. 
+    However, note that our implementation still guarantees the properties described in the paper, since during each insertion, 
+    the result of our hash computation is guaranteed to fall within a specific bin (see function get_p1_p2(uint64_t id_and_counter, Client* client)). 
+    Thus, we ensure that every element completes its eviction process within its assigned bin.*/
     for(Branch* branch : buffer_curr) {
         if(branch != nullptr && !branch->is_dummy_for_shuffle) {
             insert(branch, client);
         }
     }
+    client->communication_round_trip_ += buffer_curr.size() / Z;
+    client->communication_volume_ += buffer_curr.size() * B; 
     
     // 8. 资源清理
     // dummy_arena 会在函数结束时自动析构，无需手动 delete
@@ -559,7 +569,7 @@ void CuckooTable::oblivious_shuffle_and_insert_last_level(std::vector<Branch*>& 
                 
                 insert(branch, client);
                 curr_id = branch->id;
-            }                
+            }
         }
     }
     client->communication_round_trip_ += buffer_curr.size() / Z;

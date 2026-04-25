@@ -8,7 +8,8 @@
 class Client {
 public:
     Cryptor* cryptor_;
-    std::unordered_map<int, Branch*> stash_;     // save the stash temprorary data
+    // std::unordered_map<int, Branch*> stash_;     // save the stash temprorary data
+    std::vector<Branch*> stash_;
     std::vector<size_t> vec_seed1_; // save the 1st hash seed every level
     std::vector<size_t> vec_seed2_; // save the 2nd hash seed every level
     std::vector<bool> vec_hotree_level_i_is_empty_; // flag if the level i is empty

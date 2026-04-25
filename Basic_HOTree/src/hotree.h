@@ -32,7 +32,10 @@ public:
     Branch* Access(uint64_t id, int counter_for_lastest_data, int level_i);
     Branch* Self_healing_Access(int id, int counter_for_lastest_data, int prediction_level);
     void PerformGarbageCollection(int target_level);
-
+    
+    Branch* Retrun_in_stash(size_t id, size_t counter, Client* client);
+    Branch* Retrun_in_stash(size_t id, size_t counter, const std::vector<Branch*> &stash_);
+    Branch* Retrun_in_stash_and_remove(size_t id, size_t counter, std::vector<Branch*>& stash_);
     // for debug
     std::vector<double> GetTextWeight(std::string text);
     void print_stash();
