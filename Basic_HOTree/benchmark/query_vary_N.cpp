@@ -35,6 +35,8 @@ vector<DatasetConfig> datasets = {
     {"yelp", "../../dataset/yelp/keywords_dict.txt", "../../dataset/yelp/dataset.txt"},
     {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
     {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
+    // {"synthetic", "../../dataset/synthetic/keywords_dict.txt", "../../dataset/synthetic/dataset.txt"},
+    // {"synthetic_zipf", "../../dataset/synthetic_zipf/keywords_dict.txt", "../../dataset/synthetic_zipf/dataset.txt"}
 };
 
 int main() {

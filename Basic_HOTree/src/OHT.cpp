@@ -357,52 +357,107 @@ void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_element
     }
 
     // 5. 【优化 2】并行 Butterfly Network (Ping-Pong 模式)
-    for (int i = 0; i < num_levels_shuffle; ++i) {
-        // 预计算位运算所需的掩码，避免在循环内部做除法
-        const int p2i = 1 << i;
-        const int p2i_mask = p2i - 1; // 用于替代 % p2i
+    // for (int i = 0; i < num_levels_shuffle; ++i) {
+    //     // 预计算位运算所需的掩码，避免在循环内部做除法
+    //     const int p2i = 1 << i;
+    //     const int p2i_mask = p2i - 1; // 用于替代 % p2i
         
-        #pragma omp parallel for schedule(static)
-        for (int j = 0; j < B / 2; ++j) {
-            // 【优化 2】位运算替代取模和除法
-            // 原逻辑: b1 = (j % p2i) + (j / p2i) * (2 * p2i);
-            // 优化后:
-            int b1 = (j & p2i_mask) + ((j >> i) << (i + 1));
-            int b2 = b1 + p2i;
+    //     // note that we have multi-users, each user can paticipant in the task
+    //     #pragma omp parallel for schedule(static) if(B / 2 > OMP_B_THRESHOLD)
+    //     for (int j = 0; j < B / 2; ++j) {
+    //         // 【优化 2】位运算替代取模和除法
+    //         // 原逻辑: b1 = (j % p2i) + (j / p2i) * (2 * p2i);
+    //         // 优化后:
+    //         int b1 = (j & p2i_mask) + ((j >> i) << (i + 1));
+    //         int b2 = b1 + p2i;
 
-            // 【优化 4】使用迭代器区间构造，避免逐个 push_back
-            // vector 的范围构造函数通常底层使用 memcpy/memmove，速度极快
-            auto start_b1 = buffer_curr.begin() + b1 * Z;
-            std::vector<Branch*> bucket_i_b1(start_b1, start_b1 + Z);
+    //         // 【优化 4】使用迭代器区间构造，避免逐个 push_back
+    //         // vector 的范围构造函数通常底层使用 memcpy/memmove，速度极快
+    //         auto start_b1 = buffer_curr.begin() + b1 * Z;
+    //         std::vector<Branch*> bucket_i_b1(start_b1, start_b1 + Z);
 
-            auto start_b2 = buffer_curr.begin() + b2 * Z;
-            std::vector<Branch*> bucket_i_b2(start_b2, start_b2 + Z);
+    //         auto start_b2 = buffer_curr.begin() + b2 * Z;
+    //         std::vector<Branch*> bucket_i_b2(start_b2, start_b2 + Z);
 
-            // 预分配输出 vector，避免 realloc
-            std::vector<Branch*> out_1(Z), out_2(Z);
+    //         // 预分配输出 vector，避免 realloc
+    //         std::vector<Branch*> out_1(Z), out_2(Z);
 
-            if(i == 0) {
-                client->ObliviousMergeSplit_firstlevel(bucket_i_b1, bucket_i_b2, out_1, out_2, i, num_levels_shuffle, HOTREE_level_);
-            } else {
-                client->ObliviousMergeSplit(bucket_i_b1, bucket_i_b2, out_1, out_2, i, num_levels_shuffle, HOTREE_level_);
+    //         if(i == 0) {
+    //             client->ObliviousMergeSplit_firstlevel(bucket_i_b1, bucket_i_b2, out_1, out_2, i, num_levels_shuffle, HOTREE_level_);
+    //         } else {
+    //             client->ObliviousMergeSplit(bucket_i_b1, bucket_i_b2, out_1, out_2, i, num_levels_shuffle, HOTREE_level_);
+    //         }
+
+    //         // 写回 buffer_next (连续内存写入)
+    //         int target_offset_1 = (2 * j) * Z;
+    //         int target_offset_2 = (2 * j + 1) * Z;
+            
+    //         // 使用 memcpy 或者 std::copy 替代手动循环赋值
+    //         // 只要 Branch* 是指针，copy 就是浅拷贝，非常快
+    //         std::copy(out_1.begin(), out_1.end(), buffer_next.begin() + target_offset_1);
+    //         std::copy(out_2.begin(), out_2.end(), buffer_next.begin() + target_offset_2);
+    //     }
+
+    //     // 统计更新 (移出 parallel 区域是正确的)
+    //     client->communication_round_trip_ += (B / 2) / num_threads;
+    //     client->communication_volume_ += (B / 2) * 2 * Z * BlockSize * 2; 
+
+    //     // 【关键】交换 Buffer，准备下一层
+    //     // std::swap 对 vector 只是交换内部指针，开销为 O(1)
+    //     std::swap(buffer_curr, buffer_next);
+    // }
+    for (int i = 0; i < num_levels_shuffle; ++i) {
+        const int p2i = 1 << i;
+        const int p2i_mask = p2i - 1; 
+
+        // 改为按 num_users 步进
+        for (int j_start = 0; j_start < B / 2; j_start += num_users) {
+            // 计算当前批次实际数量 (处理尾部不够 20 的情况)
+            int current_batch = std::min(num_users, (B / 2) - j_start);
+            
+            // 准备 Batch 容器
+            std::vector<std::vector<Branch*>> batch_in_0(current_batch);
+            std::vector<std::vector<Branch*>> batch_in_1(current_batch);
+            std::vector<std::vector<Branch*>> batch_out_0, batch_out_1;
+            
+            // 1. 组装输入 Batch (完全在内存连续区域操作)
+            for (int k = 0; k < current_batch; ++k) {
+                int j = j_start + k;
+                int b1 = (j & p2i_mask) + ((j >> i) << (i + 1));
+                int b2 = b1 + p2i;
+                
+                auto start_b1 = buffer_curr.begin() + b1 * Z;
+                batch_in_0[k] = std::vector<Branch*>(start_b1, start_b1 + Z);
+                
+                auto start_b2 = buffer_curr.begin() + b2 * Z;
+                batch_in_1[k] = std::vector<Branch*>(start_b2, start_b2 + Z);
             }
 
-            // 写回 buffer_next (连续内存写入)
-            int target_offset_1 = (2 * j) * Z;
-            int target_offset_2 = (2 * j + 1) * Z;
-            
-            // 使用 memcpy 或者 std::copy 替代手动循环赋值
-            // 只要 Branch* 是指针，copy 就是浅拷贝，非常快
-            std::copy(out_1.begin(), out_1.end(), buffer_next.begin() + target_offset_1);
-            std::copy(out_2.begin(), out_2.end(), buffer_next.begin() + target_offset_2);
+            // 2. 批处理调用 (20 个用户并发执行)
+            bool is_first_level = (i == 0);
+            client->ObliviousMergeSplit_Batched(
+                batch_in_0, batch_in_1, 
+                batch_out_0, batch_out_1, 
+                i, num_levels_shuffle, HOTREE_level_, is_first_level
+            );
+
+            // 3. 将结果写回双缓冲的 Next 阶段
+            for (int k = 0; k < current_batch; ++k) {
+                int j = j_start + k;
+                int dest_idx_1 = (2 * j) * Z;
+                int dest_idx_2 = (2 * j + 1) * Z;
+                
+                std::copy(batch_out_0[k].begin(), batch_out_0[k].end(), buffer_next.begin() + dest_idx_1);
+                std::copy(batch_out_1[k].begin(), batch_out_1[k].end(), buffer_next.begin() + dest_idx_2);
+            }
         }
 
-        // 统计更新 (移出 parallel 区域是正确的)
-        client->communication_round_trip_ += (B / 2) / num_threads;
+        // 统计更新 (注意轮次统计的变化：每次发送一个 Batch 算一轮交互)
+        // 如果是严格模拟网络，20 个用户并发发送算 1 个通信回合
+        client->communication_round_trip_ += ceil((double)(B / 2) / num_users);
         client->communication_volume_ += (B / 2) * 2 * Z * BlockSize * 2; 
 
-        // 【关键】交换 Buffer，准备下一层
-        // std::swap 对 vector 只是交换内部指针，开销为 O(1)
+        // 交换 Buffer，准备下一层
         std::swap(buffer_curr, buffer_next);
     }
 
@@ -448,8 +503,8 @@ void CuckooTable::oblivious_shuffle_and_insert_last_level(std::vector<Branch*>& 
     int total_nodes_per_level = B * Z;
 
     // 2. 并行解密 (保持原有的计算密集型优化)
-    omp_set_num_threads(num_threads);
-    #pragma omp parallel for schedule(static)
+    // omp_set_num_threads(num_threads);
+    // #pragma omp parallel for schedule(static)
     for(int i = 0; i < (int)all_elements.size(); i++) {
         all_elements[i]->trueData = client->cryptor_->aes_decrypt(all_elements[i]->trueData, branchs_level_belong_to[i]);
     }
@@ -460,7 +515,7 @@ void CuckooTable::oblivious_shuffle_and_insert_last_level(std::vector<Branch*>& 
     std::vector<Branch*> buffer_next(total_nodes_per_level);
 
     // 使用 parallel for 初始化以触发 NUMA 的 First-Touch 策略
-    #pragma omp parallel for schedule(static)
+    // #pragma omp parallel for schedule(static)
     for(int i = 0; i < total_nodes_per_level; ++i) {
         buffer_curr[i] = nullptr;
         buffer_next[i] = nullptr;
@@ -499,7 +554,7 @@ void CuckooTable::oblivious_shuffle_and_insert_last_level(std::vector<Branch*>& 
         const int p2i = 1 << i;
         const int mask = p2i - 1; // 用于位运算替代取模
 
-        #pragma omp parallel for schedule(static)
+        // #pragma omp parallel for schedule(static)
         for (int j = 0; j < B / 2; ++j) {
             // 【优化】位运算计算索引
             int b1 = (j & mask) + ((j >> i) << (i + 1));
@@ -918,7 +973,7 @@ void CuckooTable::oblivious_shuffle(Client* client) {
     // Butterfly 网络层级交换
     omp_set_num_threads(num_threads);
     for (int i = 0; i < num_levels_shuffle; ++i) {
-        #pragma omp parallel for
+        // #pragma omp parallel for
         for (int j = 0; j < B / 2; ++j) {
             int power_of_2_i = 1 << i;
             int power_of_2_i_plus_1 = 1 << (i + 1);

@@ -37,6 +37,18 @@ public:
 
     int get_first_empty_level();
 
+    // 在 client.h 中增加：
+    void ObliviousMergeSplit_Batched(
+        const std::vector<std::vector<Branch*>>& batched_in_0,
+        const std::vector<std::vector<Branch*>>& batched_in_1,
+        std::vector<std::vector<Branch*>>& batched_out_0,
+        std::vector<std::vector<Branch*>>& batched_out_1,
+        int level_index,
+        int num_levels_shuffle,
+        int HOTREE_level,
+        bool is_first_level
+    );
+
     double CalcuTextRelevancy(std::vector<double> weight1, std::vector<double> weight2);
 
     double CalcuTestSPaceRele(Branch *n1, Branch *n2);

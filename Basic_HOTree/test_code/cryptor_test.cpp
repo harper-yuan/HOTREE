@@ -109,4 +109,50 @@ BOOST_AUTO_TEST_CASE(test_cryptor_correctness) {
     std::cout << "[Pass] Branch Element Encryption (POD fields)" << std::endl;
 }
 
+BOOST_AUTO_TEST_CASE(test_cryptor_performance) {
+    // 1. 准备环境
+    int L = 5;
+    Cryptor cryptor(L);
+    int test_key_index = 2;
+    int iterations = 10000; // 迭代次数，可根据需要调整
+    
+    std::string original_text = padZero("This is a performance test message for AES-CTR encryption.");
+    std::string cipher_text;
+    std::string recovered_text;
+
+    std::cout << "--- Starting Cryptor Performance Test (" << iterations << " iterations) ---" << std::endl;
+
+    // 2. 测试加密效率
+    auto start_enc = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < iterations; ++i) {
+        cipher_text = cryptor.aes_encrypt(original_text, test_key_index);
+        // 防止编译器优化掉循环
+        if (cipher_text.empty()) BOOST_FAIL("Encryption failed during performance test");
+    }
+    auto end_enc = std::chrono::high_resolution_clock::now();
+    
+    std::chrono::duration<double, std::micro> duration_enc = end_enc - start_enc;
+    double avg_enc_time = duration_enc.count() / iterations;
+
+    // 3. 测试解密效率
+    auto start_dec = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < iterations; ++i) {
+        recovered_text = cryptor.aes_decrypt(cipher_text, test_key_index);
+        if (recovered_text.empty()) BOOST_FAIL("Decryption failed during performance test");
+    }
+    auto end_dec = std::chrono::high_resolution_clock::now();
+
+    std::chrono::duration<double, std::micro> duration_dec = end_dec - start_dec;
+    double avg_dec_time = duration_dec.count() / iterations;
+
+    // 4. 输出结果
+    std::cout << "Data size: " << original_text.length() << " bytes" << std::endl;
+    std::cout << "Average Encryption Time: " << avg_enc_time << " us (微秒)" << std::endl;
+    std::cout << "Average Decryption Time: " << avg_dec_time << " us (微秒)" << std::endl;
+    std::cout << "Total Throughput: " << (original_text.length() / avg_enc_time) * 1000000 / (1024 * 1024) << " MB/s" << std::endl;
+
+    // 验证最后一次结果确保正确性
+    BOOST_CHECK_EQUAL(original_text, recovered_text);
+}
+
 BOOST_AUTO_TEST_SUITE_END()

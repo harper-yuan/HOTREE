@@ -116,6 +116,87 @@ size_t Client::compute_hash2(uint64_t id, size_t level_i, size_t mod_size) const
     return h % mod_size;
 }
 
+
+void Client::ObliviousMergeSplit_Batched(
+    const std::vector<std::vector<Branch*>>& batched_in_0,
+    const std::vector<std::vector<Branch*>>& batched_in_1,
+    std::vector<std::vector<Branch*>>& batched_out_0,
+    std::vector<std::vector<Branch*>>& batched_out_1,
+    int level_index,
+    int num_levels_shuffle,
+    int HOTREE_level,
+    bool is_first_level
+) {
+    int current_batch = batched_in_0.size();
+    batched_out_0.resize(current_batch);
+    batched_out_1.resize(current_batch);
+
+    // 外层并行：分配给最高 20 个用户（线程）
+    // 每一个线程完整处理一对桶的解密、路由、加密，彻底消除嵌套并行的开销
+    omp_set_num_threads(num_users); 
+    
+    #pragma omp parallel for schedule(static, 1)
+    for (int k = 0; k < current_batch; ++k) {
+        // 使用 static 避免频繁构造 Dummy，注意多线程下只读是安全的
+        static Branch dummy_branch(true, true);
+        std::vector<Branch*> pool;
+        pool.reserve(batched_in_0[k].size() + batched_in_1[k].size());
+
+        // 1. 解密阶段 (非 first_level 需要解密)
+        if (!is_first_level) {
+            for(size_t i = 0; i < batched_in_0[k].size(); ++i) {
+                Branch* s = batched_in_0[k][i];
+                if (s != nullptr && !s->is_dummy_for_shuffle) {
+                    s->trueData = cryptor_->aes_decrypt(s->trueData, HOTREE_level);
+                }
+            }
+            for(size_t i = 0; i < batched_in_1[k].size(); ++i) {
+                Branch* s = batched_in_1[k][i];
+                if (s != nullptr && !s->is_dummy_for_shuffle) {
+                    s->trueData = cryptor_->aes_decrypt(s->trueData, HOTREE_level);
+                }
+            }
+        }
+
+        // 2. 收集非 Dummy 元素
+        for(auto* s : batched_in_0[k]) {
+            if (s != nullptr && !s->is_dummy_for_shuffle) pool.push_back(s);
+        }
+        for(auto* s : batched_in_1[k]) {
+            if (s != nullptr && !s->is_dummy_for_shuffle) pool.push_back(s);
+        }
+
+        std::vector<Branch*> real_elements_0;
+        std::vector<Branch*> real_elements_1;
+        real_elements_0.reserve(Z);
+        real_elements_1.reserve(Z);
+
+        // 3. 路由 & 加密 (单线程顺序执行，无需竞争，Cache 命中率极高)
+        int check_bit = num_levels_shuffle - 1 - level_index;
+        int mask = 1 << check_bit;
+        size_t mod_size = 1 << num_levels_shuffle;
+
+        for (auto* elem : pool) {
+            // 所有元素重新加密
+            elem->trueData = cryptor_->aes_encrypt(elem->trueData, HOTREE_level);
+            
+            // 计算路由
+            if (compute_hash(combine_unique(elem->id, elem->counter_for_lastest_data), mod_size) & mask) {
+                real_elements_1.push_back(elem);
+            } else {
+                real_elements_0.push_back(elem);
+            }
+        }
+
+        // 4. 补齐 Dummy 指针
+        while (real_elements_0.size() < Z) real_elements_0.push_back(&dummy_branch);
+        while (real_elements_1.size() < Z) real_elements_1.push_back(&dummy_branch);
+
+        batched_out_0[k] = std::move(real_elements_0);
+        batched_out_1[k] = std::move(real_elements_1);
+    }
+}
+
 // src/client.cpp
 void Client::ObliviousMergeSplit(
     std::vector<Branch*>& bucket_in_0,

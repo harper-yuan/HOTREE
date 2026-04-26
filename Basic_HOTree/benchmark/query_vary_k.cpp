@@ -28,7 +28,9 @@ const vector<int> K_VALUES = {1};
 vector<DatasetConfig> datasets = {
     {"yelp", "../../dataset/yelp/keywords_dict.txt", "../../dataset/yelp/dataset.txt"},
     {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
-    {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"}
+    {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
+    // {"synthetic", "../../dataset/synthetic/keywords_dict.txt", "../../dataset/synthetic/dataset.txt"},
+    // {"synthetic_zipf", "../../dataset/synthetic_zipf/keywords_dict.txt", "../../dataset/synthetic_zipf/dataset.txt"}
 };
 
 int main() {
@@ -103,6 +105,7 @@ int main() {
             }
 
             double avg_t = (total_time + hotree.compute_additional_oblivious_shuffle_time()) / actual_queries;
+            // double avg_t = (total_time) / actual_queries;
             double avg_r = (double)total_rounds / actual_queries;
             double avg_v = (double)total_volume / actual_queries;
             double avg_a = (double)total_counter_access / actual_queries;
