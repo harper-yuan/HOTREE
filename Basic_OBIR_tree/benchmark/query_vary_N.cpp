@@ -26,17 +26,15 @@ struct DatasetConfig {
 };
 const int FIXED_K = 1;
 
-const vector<int> N_VALUES = {(int)pow(2,10), (int)pow(2,12), (int)pow(2,14), (int)pow(2,16), (int)pow(2,18), (int)pow(2,20)};
-// const vector<int> N_VALUES = {(int)pow(2,10), (int)pow(2,12), (int)pow(2,14)};
+// const vector<int> N_VALUES = {(int)pow(2,10), (int)pow(2,12), (int)pow(2,14), (int)pow(2,16), (int)pow(2,18), (int)pow(2,20)};
+const vector<int> N_VALUES = {(int)pow(2,10), (int)pow(2,12), (int)pow(2,14)};
 // const vector<int> N_VALUES = {(int)pow(2,two_power)};
 
 // 定义四个数据集
 vector<DatasetConfig> datasets = {
     {"yelp", "../../dataset/yelp/keywords_dict.txt", "../../dataset/yelp/dataset.txt"},
-    {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
-    {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
-    // {"synthetic", "../../dataset/synthetic/keywords_dict.txt", "../../dataset/synthetic/dataset.txt"},
-    // {"synthetic_zipf", "../../dataset/synthetic_zipf/keywords_dict.txt", "../../dataset/synthetic_zipf/dataset.txt"}
+    // {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
+    // {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
 };
 
 int main() {

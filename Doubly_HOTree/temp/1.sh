@@ -1,0 +1,1 @@
+g++ -O3 -std=c++20 test.cpp -I./include -ltbb -lcrypto -lpthread -fopenmp -o test

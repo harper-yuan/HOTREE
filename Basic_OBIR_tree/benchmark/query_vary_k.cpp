@@ -20,17 +20,14 @@ struct DatasetConfig {
     string dict_path;
     string data_path;
 };
-int two_power = 20;
+int two_power = 14;
 const int FIXED_N = (int)pow(2,two_power); // 固定数据规模
 const vector<int> K_VALUES = {1, 2, 3, 4, 5, 6};
-// const vector<int> K_VALUES = {1};
 
 vector<DatasetConfig> datasets = {
     {"yelp", "../../dataset/yelp/keywords_dict.txt", "../../dataset/yelp/dataset.txt"},
-    {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
-    {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"},
-    // {"synthetic", "../../dataset/synthetic/keywords_dict.txt", "../../dataset/synthetic/dataset.txt"},
-    // {"synthetic_zipf", "../../dataset/synthetic_zipf/keywords_dict.txt", "../../dataset/synthetic_zipf/dataset.txt"}
+    // {"tweets", "../../dataset/tweets/keywords_dict.txt", "../../dataset/tweets/dataset.txt"},
+    // {"foursquare", "../../dataset/foursquare/keywords_dict.txt", "../../dataset/foursquare/dataset.txt"}
 };
 
 int main() {
@@ -105,7 +102,6 @@ int main() {
             }
 
             double avg_t = (total_time + hotree.compute_additional_oblivious_shuffle_time()) / actual_queries;
-            // double avg_t = (total_time) / actual_queries;
             double avg_r = (double)total_rounds / actual_queries;
             double avg_v = (double)total_volume / actual_queries;
             double avg_a = (double)total_counter_access / actual_queries;
@@ -115,7 +111,6 @@ int main() {
             csv << "HOTREE," << ds.name << "," << FIXED_N << "," << k << "," << avg_t << "," << avg_r << "," << avg_v << "," << BlockSize << "," << avg_a << "," << avg_as << "," << initial_time_s << "\n";
             
             cout << "  [K=" << setw(2) << k << "] Time: " << fixed << setprecision(2) << avg_t << "ms" << " oblivious shuffle time: "<< hotree.compute_additional_oblivious_shuffle_time() << "ms" << endl;
-            cout<< "stash size max = " <<hotree.stash_max_value<<endl;
         }
     }
     csv.close();

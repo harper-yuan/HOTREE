@@ -1,0 +1,4 @@
+Scheme,Dataset,N,K,AvgTime_ms,AvgRounds,AvgVolume_Bytes,BlockSize,Access,Self_Access,InitialTime_s
+HOTREE,yelp,262144,1,1.01422,6.21438,2.03749e+06,4096,12.7996,0,54.5743
+HOTREE,tweets,262144,1,0.683111,6.01614,1.99616e+06,4096,12.0017,0,22.997
+HOTREE,foursquare,262144,1,0.381301,6.0171,1.9965e+06,4096,12.01,0,17.3433

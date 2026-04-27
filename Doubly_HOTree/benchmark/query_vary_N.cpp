@@ -26,8 +26,8 @@ struct DatasetConfig {
 };
 const int FIXED_K = 1;
 
-const vector<int> N_VALUES = {(int)pow(2,10), (int)pow(2,12), (int)pow(2,14), (int)pow(2,16), (int)pow(2,18), (int)pow(2,20)};
-// const vector<int> N_VALUES = {(int)pow(2,10), (int)pow(2,12), (int)pow(2,14)};
+// const vector<int> N_VALUES = {(int)pow(2,10), (int)pow(2,12), (int)pow(2,14), (int)pow(2,16), (int)pow(2,18), (int)pow(2,20)};
+const vector<int> N_VALUES = {(int)pow(2,10), (int)pow(2,12), (int)pow(2,14)};
 // const vector<int> N_VALUES = {(int)pow(2,two_power)};
 
 // 定义四个数据集

@@ -2,8 +2,8 @@
 using namespace std;
 
 void HOTree::print_stash() {
-    for(auto const& elem : client_->stash_) {
-        std::cout << "Key: " << elem->id << std::endl;
+    for(auto const& [key, val] : client_->stash_) {
+        std::cout << "Key: " << key << std::endl;
     }
 }
 
@@ -58,138 +58,6 @@ void HOTree::PerformGarbageCollection(int target_level) {
     }
 }
 
-Branch* HOTree::Retrun_in_stash(size_t id, size_t counter, Client* client) {
-    Branch* result = nullptr;
-    for (size_t i = 0; i < client->stash_.size(); ++i) {
-        if (client->stash_[i] && client->stash_[i]->id == id && client->stash_[i]->counter_for_lastest_data == counter) {
-            {
-                result = new Branch(client->stash_[i]);
-                // ✅【修复】新增这一行：将新对象交给 HOTree 管理
-                all_branchs.push_back(result);
-            }
-        }
-    }
-    return result;
-}
-
-Branch* HOTree::Retrun_in_stash(size_t id, size_t counter, const std::vector<Branch*> & stash_) {
-    Branch* result = nullptr;
-    for (size_t i = 0; i < stash_.size(); ++i) {
-        if (stash_[i] && stash_[i]->id == id && stash_[i]->counter_for_lastest_data == counter) {
-            {
-                result = new Branch(stash_[i]);
-                // ✅【修复】新增这一行：将新对象交给 HOTree 管理
-                all_branchs.push_back(result);
-            }
-        }
-    }
-    return result;
-}
-
-// Branch* HOTree::Retrun_in_stash(size_t id, size_t counter, Client* client) {
-//     Branch* result = nullptr;
-//     bool found = false; // 用于模拟 break，一旦找到就跳过后续循环
-
-//     // 告诉 OpenMP 并行化下面的 for 循环，并且共享 result 和 found 变量
-//     #pragma omp parallel for shared(result, found)
-//     for (size_t i = 0; i < client->stash_.size(); ++i) {
-//         // 如果其他线程已经找到了，直接跳过当前迭代，提升效率
-//         if (found) continue;
-
-//         if (client->stash_[i] && 
-//             client->stash_[i]->id == id && 
-//             client->stash_[i]->counter_for_lastest_data == counter) {
-            
-//             // 临界区：确保同一时间只有一个线程能执行这里的代码，防止 push_back 崩溃
-//             #pragma omp critical
-//             {
-//                 // 双重检查，防止多个线程同时等待进入临界区导致重复 push
-//                 if (!found) {
-//                     result = new Branch(client->stash_[i]);
-//                     // ✅ 安全地将新对象交给 HOTree 管理
-//                     all_branchs.push_back(result);
-//                     found = true; 
-//                 }
-//             }
-//         }
-//     }
-//     return result;
-// }
-
-// // 优化了传参方式，加上了 const & 避免不必要的拷贝
-// Branch* HOTree::Retrun_in_stash(size_t id, size_t counter, const std::vector<Branch*>& stash_) {
-//     Branch* result = nullptr;
-//     bool found = false;
-
-//     #pragma omp parallel for shared(result, found)
-//     for (size_t i = 0; i < stash_.size(); ++i) {
-//         if (found) continue;
-
-//         if (stash_[i] && 
-//             stash_[i]->id == id && 
-//             stash_[i]->counter_for_lastest_data == counter) {
-            
-//             #pragma omp critical
-//             {
-//                 if (!found) {
-//                     result = new Branch(stash_[i]);
-//                     // ✅ 安全地将新对象交给 HOTree 管理
-//                     all_branchs.push_back(result);
-//                     found = true;
-//                 }
-//             }
-//         }
-//     }
-//     return result;
-// }
-
-Branch* HOTree::Retrun_in_stash_and_remove(size_t id, size_t counter, std::vector<Branch*>& stash_) {
-    Branch* result = nullptr;
-    bool found = false;
-
-    // 必须通过引用传递 stash_，否则删除操作对外部无效
-    // 使用 #pragma omp parallel 提高大 Stash 的扫描速度
-    {
-        Branch* local_result = nullptr;
-        bool local_found = false;
-
-        for (size_t i = 0; i < stash_.size(); ++i) {
-            // 1. 读取数据（无论是否匹配都要读取）
-            Branch* current = stash_[i];
-            
-            // 2. 检查逻辑（尽量减少复杂的条件分支）
-            bool match = (current != nullptr && 
-                          current->id == id && 
-                          current->counter_for_lastest_data == counter && 
-                          !local_found); // 确保只取第一个匹配项
-
-            // 3. 不经意赋值
-            if (match) {
-                local_result = current;
-                stash_[i] = nullptr; // 逻辑删除：原地置空
-                local_found = true;
-            } else {
-                // 为了对抗细粒度的计时攻击，可以在这里执行一次对原位置的写回
-                stash_[i] = current; 
-            }
-        }
-
-        // 将结果汇总
-        if (local_found) {
-            {
-                if (!found) {
-                    // result = local_result;
-                    result = new Branch(local_result);
-                    // ✅【修复】新增这一行：将新对象交给 HOTree 管理
-                    all_branchs.push_back(result);
-                    found = true;
-                }
-            }
-        }
-    }
-    return result;
-}
-
 void HOTree::clear_additional_oblivious_shuffle_time() {
     for(int i = client_->min_level_; i <= client_->max_level_; i++) {
         vec_hashtable_[i]->shuffle_count = 0;
@@ -212,7 +80,6 @@ void HOTree::findid(int target_id) {
     for (int level = 0; level < vec_hashtable_.size(); ++level) {
         auto& current_table_ptr = vec_hashtable_[level];
         auto& current_table_stash = client_->vector_every_level_stash_[level];
-        
         if (!current_table_ptr) continue;
 
         // 2. 检查该层的主表 (table)
@@ -320,12 +187,10 @@ void HOTree::Eviction(Client* client) {
 
             // move the data in cuckoo table stash to a vector
             for(auto & elem : client_->vector_every_level_stash_[level_i]) {
-                if(elem) {
-                    elem->level = target_level;
-                    elem->trueData = client->cryptor_->aes_encrypt(elem->trueData, target_level);
-                    all_shuffled_branchs.push_back(elem);
-                    branchs_level_belong_to.push_back(level_i);
-                }
+                elem->level = target_level;
+                elem->trueData = client->cryptor_->aes_encrypt(elem->trueData, target_level);
+                all_shuffled_branchs.push_back(elem);
+                branchs_level_belong_to.push_back(level_i);
             }
             client_->vector_every_level_stash_[level_i].clear();
 
@@ -365,7 +230,7 @@ void HOTree::Eviction(Client* client) {
     client->vec_hotree_level_i_is_empty_[target_level] = false; // level_i will be full
 
     /*-------------------------Move data of client stash to a vector-------------------------------*/
-    for (auto const& elem : client->stash_) {
+    for (auto const& [id, elem] : client->stash_) {
         elem->trueData = client->cryptor_->aes_encrypt(elem->trueData, target_level);
         elem->level = target_level;
         if(elem->id == debug_id && if_is_debug) {
@@ -427,9 +292,9 @@ Branch* HOTree::Access(uint64_t id, int counter_for_lastest_data, int level_i) {
         }
         else {
             if(i == level_i) {
-                // size_t p1 = client_->compute_hash1(id_counter_combine, i, vec_hashtable_[i]->getTableCapacity());
-                // size_t p2 = client_->compute_hash2(id_counter_combine, i, vec_hashtable_[i]->getTableCapacity());
-                auto [p1, p2] = vec_hashtable_[i]->get_p1_p2(id_counter_combine, client_);
+                size_t p1 = client_->compute_hash1(id_counter_combine, i, vec_hashtable_[i]->getTableCapacity());
+                size_t p2 = client_->compute_hash2(id_counter_combine, i, vec_hashtable_[i]->getTableCapacity());
+
                 if(id == debug_id && if_is_debug) {
                     std::cout<<"In search level"<< level_i <<" p1: "<<p1 << " seed: "<<client_->vec_seed1_[level_i]<<" table size"<< vec_hashtable_[i]->getTableCapacity()<<std::endl;
                 }
@@ -447,8 +312,8 @@ Branch* HOTree::Access(uint64_t id, int counter_for_lastest_data, int level_i) {
                 }
             }
             else {
-                size_t random = 2;
-                auto [p1, p2] = vec_hashtable_[i]->get_p1_p2(id_counter_combine + random, client_); //random access
+                size_t p1 = client_->getRandomIndex(vec_hashtable_[i]->getTableCapacity());
+                size_t p2 = client_->getRandomIndex(vec_hashtable_[i]->getTableCapacity());
                 client_->communication_volume_ += BlockSize*2; // two blocks
                 auto vec_temp_branch = vec_hashtable_[i]->find_hotree(id, p1, p2);
             }
@@ -471,7 +336,13 @@ Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data, int pr
             // lookup cuckoo stash to find the id if data is not in hash table. If found, delete from cuckoo stash and move to stash
             if(result_branch == nullptr) {
                 auto& level_stash = client_->vector_every_level_stash_[i];
-                result_branch = Retrun_in_stash_and_remove(id, counter_for_lastest_data, level_stash);
+                auto it = std::find_if(level_stash.begin(), level_stash.end(), [&](Branch* b) {
+                    return b != nullptr && b->id == id && b->counter_for_lastest_data == counter_for_lastest_data;
+                });
+                if (it != level_stash.end()) {
+                    result_branch = *it; 
+                    level_stash.erase(it);
+                }
             }
         }
     }
@@ -484,10 +355,8 @@ Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data, int pr
         }
         else {
             if(result_branch == nullptr) {
-                Retrun_in_stash(id, counter_for_lastest_data, client_->stash_); // dummy lookup
-                // size_t p1 = client_->compute_hash1(combine_unique(id, counter_for_lastest_data), i, vec_hashtable_[i]->getTableCapacity());
-                // size_t p2 = client_->compute_hash2(combine_unique(id, counter_for_lastest_data), i, vec_hashtable_[i]->getTableCapacity());
-                auto [p1, p2] = vec_hashtable_[i]->get_p1_p2(combine_unique(id, counter_for_lastest_data), client_);
+                size_t p1 = client_->compute_hash1(combine_unique(id, counter_for_lastest_data), i, vec_hashtable_[i]->getTableCapacity());
+                size_t p2 = client_->compute_hash2(combine_unique(id, counter_for_lastest_data), i, vec_hashtable_[i]->getTableCapacity());
 
                 if(id == debug_id && if_is_debug) {
                     std::cout<<"In self heal search level"<< i <<" p1: "<<p1 << " seed: "<<client_->vec_seed1_[i]<<" table size"<< vec_hashtable_[i]->getTableCapacity()<<std::endl;
@@ -504,7 +373,7 @@ Branch* HOTree::Self_healing_Access(int id, int counter_for_lastest_data, int pr
                             all_branchs.push_back(result_branch);
                             return result_branch;
                         }
-                    }
+                    }   
                 }
             }
             // else { //dummy lookup but no need to decrypt beacause data have found
@@ -530,27 +399,25 @@ Branch* HOTree::Retrieve(Client* client_, Triple*& triple) {
     
     int counter_for_lastest_data = triple->counter_for_lastest_data;
     
-    /*----------------------------------Find data in Client using linear scan-----------------------------------------*/
-    child_branch = Retrun_in_stash(id, counter_for_lastest_data, client_->stash_);
-
+    /*----------------------------------Find data in Client-----------------------------------------*/
+    if(child_branch == nullptr) { // found in client stash
+        auto it = client_->stash_.find(id);
+        if(it != client_->stash_.end()) {
+            child_branch = it->second;
+        }
+    }
 
     // lookup cuckoo stash to find the id if data is not in hash table. If found, delete from cuckoo stash and move to stash
     if(child_branch == nullptr) {
         auto& level_stash = client_->vector_every_level_stash_[level_i];
-        if(level_stash.size() > stash_max_value) {
-            stash_max_value = level_stash.size();
+        auto it = std::find_if(level_stash.begin(), level_stash.end(), [&](Branch* b) {
+            return b != nullptr && b->id == id && b->counter_for_lastest_data == counter_for_lastest_data;
+        });
+        if (it != level_stash.end()) {
+            child_branch = *it; 
+            level_stash.erase(it);
         }
-        child_branch = Retrun_in_stash_and_remove(id, counter_for_lastest_data, level_stash);
     }
-    else {
-        // dummy lookup
-        auto& level_stash = client_->vector_every_level_stash_[level_i];
-        if(level_stash.size() > stash_max_value) {
-            stash_max_value = level_stash.size();
-        }
-        Retrun_in_stash_and_remove(id, counter_for_lastest_data, level_stash);
-    }
-    
 
     /*----------------------------------Find data in Server cuckoo tables-----------------------------------------*/
     if(child_branch == nullptr) {
@@ -564,23 +431,22 @@ Branch* HOTree::Retrieve(Client* client_, Triple*& triple) {
             child_branch = Self_healing_Access(id, counter_for_lastest_data, level_i);
         }
     }
-    else {
-        // dummy lookup
-        Access(id, counter_for_lastest_data, level_i);
-    }
 
     /*----------------------------------update prediction values-----------------------------------------*/
     // 取回数据后，不管是从本地还是server上取的，都已经确定访问了id一次，且取回来了，因此counter++，
-    
-    triple->level = client_->get_first_empty_level();
-    triple->counter_for_lastest_data++;
-
     child_branch->level = -1;
+    client_->stash_[id] = child_branch; // move the data to stash
+    triple->level = client_->get_first_empty_level();
+    if(id == debug_id && if_is_debug) {
+        cout<<"id "<< id <<" counter before updating: "<< child_branch->counter_for_lastest_data <<endl;
+    }
+    triple->counter_for_lastest_data++;
     child_branch->counter_for_lastest_data = triple->counter_for_lastest_data;
-    client_->stash_.push_back(child_branch); // move the data to stash
-
+    if(id == debug_id && if_is_debug) {
+        cout<<"id "<< id <<" counter have update: "<< child_branch->counter_for_lastest_data <<endl;
+    }
     if(client_->stash_.size() % Z == 0 && client_->stash_.size() != 0) {
-        Eviction(client_);
+        Eviction(client_); 
     }
     return child_branch;
 }

@@ -7,13 +7,10 @@
 CuckooTable::CuckooTable(size_t initial_size, int HOTREE_level) : current_count(0) {
     HOTREE_level_ = HOTREE_level;
     shuffle_count = 0;
-    
-    // 修改：确保初始化的大小一定是 Z 的倍数
-    table.resize(get_aligned_size(initial_size));
+    table.resize(initial_size);
     
     stash.reserve(STASH_CAPACITY);
 }
-
 
 // 哈希函数保持不变
 size_t CuckooTable::hash(uint64_t id, size_t seed) const {
@@ -37,14 +34,12 @@ std::vector<Branch*> CuckooTable::find_hotree(uint64_t id, size_t place1, size_t
 
 Branch* CuckooTable::find(uint64_t id, uint64_t counter_for_lastest_data, Client* client) {
     uint64_t id_and_counter = combine_unique(id, counter_for_lastest_data);
-    
-    // 修改：获取 Bin 内的 p1 和 p2
-    auto [p1, p2] = get_p1_p2(id_and_counter, client);
-
     // 1. Table Lookups
+    size_t p1 = client->compute_hash1(id_and_counter, HOTREE_level_, table.size());
     if (table[p1].occupied && table[p1].branch != nullptr && table[p1].branch->id == id && table[p1].branch->counter_for_lastest_data == counter_for_lastest_data) {
         return table[p1].branch;
     }
+    size_t p2 = client->compute_hash2(id_and_counter, HOTREE_level_, table.size());
     if (table[p2].occupied && table[p2].branch != nullptr && table[p2].branch->id == id && table[p2].branch->counter_for_lastest_data == counter_for_lastest_data) {
         return table[p2].branch;
     }
@@ -69,13 +64,9 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
         return; 
     }
 
-    static std::mt19937 rng(global_seed);
+    static std::mt19937 rng(global_seed); 
     for (int i = 0; i < MAX_KICKS; ++i) {
-        uint64_t id_and_counter = combine_unique(item->id, item->counter_for_lastest_data);
-        
-        // 修改：使用统一的函数获取 Bin 内的两个位置
-        auto [p1, p2] = get_p1_p2(id_and_counter, client);
-
+        size_t p1 = client->compute_hash1(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
         if (!table[p1].occupied) {
             table[p1].branch = item;
             table[p1].occupied = true;
@@ -83,6 +74,7 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
             return;
         }
 
+        size_t p2 = client->compute_hash2(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
         if (!table[p2].occupied) {
             table[p2].branch = item;
             table[p2].occupied = true;
@@ -90,16 +82,14 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
             return;
         }
 
-        // 随机踢出一个指针 (此时踢出只会在该 Bin 内部的 p1 和 p2 之间发生)
+        // 随机踢出一个指针
         bool kick_p1 = (rng() % 2) == 0;
         size_t victim_pos = kick_p1 ? p1 : p2;
         std::swap(item, table[victim_pos].branch);
     }
-    
-    // 如果达到了 MAX_KICKS 还没插入成功，放入全局 stash
+    size_t p1 = client->compute_hash1(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
+    size_t p2 = client->compute_hash2(combine_unique(item->id, item->counter_for_lastest_data), HOTREE_level_, table.size());
     if(if_is_debug) {
-        uint64_t debug_id_counter = combine_unique(item->id, item->counter_for_lastest_data);
-        auto [p1, p2] = get_p1_p2(debug_id_counter, client);
         if(table[p1].branch!=nullptr && table[p1].branch->id == debug_id) {
             std::cout<<"In insert id "<< table[p1].branch->id <<" level "<<HOTREE_level_ <<" p1: "<<p1 << " seed: "<<client->vec_seed1_[HOTREE_level_]<<" table size"<< table.size()<< " counter "<< table[p1].branch->counter_for_lastest_data<<std::endl;    
         }
@@ -115,8 +105,6 @@ void CuckooTable::insert_internal(Branch* item, Client* client) {
         }
         return; 
     }
-    
-    // 兜底扩容
     rehash(table.size() * 2, client);
     insert_internal(item, client);
 }
@@ -174,7 +162,7 @@ std::vector<Branch*> CuckooTable::oblivious_tight_compaction(std::vector<Branch*
 
 void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_elements_before_otc, std::vector<int> branchs_level_belong_to, Client* client) {
     // 1. 初始化基础状态
-    table.assign(get_aligned_size(pow(2, HOTREE_level_)), Entry());
+    table.assign(pow(2, HOTREE_level_), Entry());
     stash.clear();
     current_count = 0;
     client->UpdateSeed(HOTREE_level_);
@@ -245,8 +233,8 @@ void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_element
     on the layer where the original data is located. All decrypted data is encrypted 
     using the key corresponding to the new layer, but for the sake of concise and easy to 
     understand code, we will decrypt it here. Note that this does not affect performance. */
-    // omp_set_num_threads(num_threads);
-    // #pragma omp parallel for schedule(static)
+    omp_set_num_threads(num_threads);
+    #pragma omp parallel for schedule(static)
     for(int i = 0; i < (int)all_elements.size(); i++) {
         all_elements[i]->trueData = client->cryptor_->aes_decrypt(all_elements[i]->trueData, branchs_level_belong_to[i]);
     }
@@ -286,107 +274,52 @@ void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_element
     }
 
     // 5. 【优化 2】并行 Butterfly Network (Ping-Pong 模式)
-    // for (int i = 0; i < num_levels_shuffle; ++i) {
-    //     // 预计算位运算所需的掩码，避免在循环内部做除法
-    //     const int p2i = 1 << i;
-    //     const int p2i_mask = p2i - 1; // 用于替代 % p2i
-        
-    //     // note that we have multi-users, each user can paticipant in the task
-    //     #pragma omp parallel for schedule(static) if(B / 2 > OMP_B_THRESHOLD)
-    //     for (int j = 0; j < B / 2; ++j) {
-    //         // 【优化 2】位运算替代取模和除法
-    //         // 原逻辑: b1 = (j % p2i) + (j / p2i) * (2 * p2i);
-    //         // 优化后:
-    //         int b1 = (j & p2i_mask) + ((j >> i) << (i + 1));
-    //         int b2 = b1 + p2i;
-
-    //         // 【优化 4】使用迭代器区间构造，避免逐个 push_back
-    //         // vector 的范围构造函数通常底层使用 memcpy/memmove，速度极快
-    //         auto start_b1 = buffer_curr.begin() + b1 * Z;
-    //         std::vector<Branch*> bucket_i_b1(start_b1, start_b1 + Z);
-
-    //         auto start_b2 = buffer_curr.begin() + b2 * Z;
-    //         std::vector<Branch*> bucket_i_b2(start_b2, start_b2 + Z);
-
-    //         // 预分配输出 vector，避免 realloc
-    //         std::vector<Branch*> out_1(Z), out_2(Z);
-
-    //         if(i == 0) {
-    //             client->ObliviousMergeSplit_firstlevel(bucket_i_b1, bucket_i_b2, out_1, out_2, i, num_levels_shuffle, HOTREE_level_);
-    //         } else {
-    //             client->ObliviousMergeSplit(bucket_i_b1, bucket_i_b2, out_1, out_2, i, num_levels_shuffle, HOTREE_level_);
-    //         }
-
-    //         // 写回 buffer_next (连续内存写入)
-    //         int target_offset_1 = (2 * j) * Z;
-    //         int target_offset_2 = (2 * j + 1) * Z;
-            
-    //         // 使用 memcpy 或者 std::copy 替代手动循环赋值
-    //         // 只要 Branch* 是指针，copy 就是浅拷贝，非常快
-    //         std::copy(out_1.begin(), out_1.end(), buffer_next.begin() + target_offset_1);
-    //         std::copy(out_2.begin(), out_2.end(), buffer_next.begin() + target_offset_2);
-    //     }
-
-    //     // 统计更新 (移出 parallel 区域是正确的)
-    //     client->communication_round_trip_ += (B / 2) / num_threads;
-    //     client->communication_volume_ += (B / 2) * 2 * Z * BlockSize * 2; 
-
-    //     // 【关键】交换 Buffer，准备下一层
-    //     // std::swap 对 vector 只是交换内部指针，开销为 O(1)
-    //     std::swap(buffer_curr, buffer_next);
-    // }
     for (int i = 0; i < num_levels_shuffle; ++i) {
+        // 预计算位运算所需的掩码，避免在循环内部做除法
         const int p2i = 1 << i;
-        const int p2i_mask = p2i - 1; 
+        const int p2i_mask = p2i - 1; // 用于替代 % p2i
+        
+        #pragma omp parallel for schedule(static)
+        for (int j = 0; j < B / 2; ++j) {
+            // 【优化 2】位运算替代取模和除法
+            // 原逻辑: b1 = (j % p2i) + (j / p2i) * (2 * p2i);
+            // 优化后:
+            int b1 = (j & p2i_mask) + ((j >> i) << (i + 1));
+            int b2 = b1 + p2i;
 
-        // 改为按 num_users 步进
-        for (int j_start = 0; j_start < B / 2; j_start += num_users) {
-            // 计算当前批次实际数量 (处理尾部不够 20 的情况)
-            int current_batch = std::min(num_users, (B / 2) - j_start);
-            
-            // 准备 Batch 容器
-            std::vector<std::vector<Branch*>> batch_in_0(current_batch);
-            std::vector<std::vector<Branch*>> batch_in_1(current_batch);
-            std::vector<std::vector<Branch*>> batch_out_0, batch_out_1;
-            
-            // 1. 组装输入 Batch (完全在内存连续区域操作)
-            for (int k = 0; k < current_batch; ++k) {
-                int j = j_start + k;
-                int b1 = (j & p2i_mask) + ((j >> i) << (i + 1));
-                int b2 = b1 + p2i;
-                
-                auto start_b1 = buffer_curr.begin() + b1 * Z;
-                batch_in_0[k] = std::vector<Branch*>(start_b1, start_b1 + Z);
-                
-                auto start_b2 = buffer_curr.begin() + b2 * Z;
-                batch_in_1[k] = std::vector<Branch*>(start_b2, start_b2 + Z);
+            // 【优化 4】使用迭代器区间构造，避免逐个 push_back
+            // vector 的范围构造函数通常底层使用 memcpy/memmove，速度极快
+            auto start_b1 = buffer_curr.begin() + b1 * Z;
+            std::vector<Branch*> bucket_i_b1(start_b1, start_b1 + Z);
+
+            auto start_b2 = buffer_curr.begin() + b2 * Z;
+            std::vector<Branch*> bucket_i_b2(start_b2, start_b2 + Z);
+
+            // 预分配输出 vector，避免 realloc
+            std::vector<Branch*> out_1(Z), out_2(Z);
+
+            if(i == 0) {
+                client->ObliviousMergeSplit_firstlevel(bucket_i_b1, bucket_i_b2, out_1, out_2, i, num_levels_shuffle, HOTREE_level_);
+            } else {
+                client->ObliviousMergeSplit(bucket_i_b1, bucket_i_b2, out_1, out_2, i, num_levels_shuffle, HOTREE_level_);
             }
 
-            // 2. 批处理调用 (20 个用户并发执行)
-            bool is_first_level = (i == 0);
-            client->ObliviousMergeSplit_Batched(
-                batch_in_0, batch_in_1, 
-                batch_out_0, batch_out_1, 
-                i, num_levels_shuffle, HOTREE_level_, is_first_level
-            );
-
-            // 3. 将结果写回双缓冲的 Next 阶段
-            for (int k = 0; k < current_batch; ++k) {
-                int j = j_start + k;
-                int dest_idx_1 = (2 * j) * Z;
-                int dest_idx_2 = (2 * j + 1) * Z;
-                
-                std::copy(batch_out_0[k].begin(), batch_out_0[k].end(), buffer_next.begin() + dest_idx_1);
-                std::copy(batch_out_1[k].begin(), batch_out_1[k].end(), buffer_next.begin() + dest_idx_2);
-            }
+            // 写回 buffer_next (连续内存写入)
+            int target_offset_1 = (2 * j) * Z;
+            int target_offset_2 = (2 * j + 1) * Z;
+            
+            // 使用 memcpy 或者 std::copy 替代手动循环赋值
+            // 只要 Branch* 是指针，copy 就是浅拷贝，非常快
+            std::copy(out_1.begin(), out_1.end(), buffer_next.begin() + target_offset_1);
+            std::copy(out_2.begin(), out_2.end(), buffer_next.begin() + target_offset_2);
         }
 
-        // 统计更新 (注意轮次统计的变化：每次发送一个 Batch 算一轮交互)
-        // 如果是严格模拟网络，20 个用户并发发送算 1 个通信回合
-        client->communication_round_trip_ += ceil((double)(B / 2) / num_users);
+        // 统计更新 (移出 parallel 区域是正确的)
+        client->communication_round_trip_ += (B / 2) / num_threads;
         client->communication_volume_ += (B / 2) * 2 * Z * BlockSize * 2; 
 
-        // 交换 Buffer，准备下一层
+        // 【关键】交换 Buffer，准备下一层
+        // std::swap 对 vector 只是交换内部指针，开销为 O(1)
         std::swap(buffer_curr, buffer_next);
     }
 
@@ -398,39 +331,16 @@ void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_element
 
     // 7. 最终插入阶段
     // 此时结果在 buffer_curr 中 (因为最后一次循环做了 swap)
-    table.assign(get_aligned_size(pow(2, HOTREE_level_)), Entry());
+    table.assign(pow(2, HOTREE_level_), Entry());
     stash.clear();
     current_count = 0;
     client->UpdateSeed(HOTREE_level_);
-
-
-    /*The oblivious shuffle has already clustered all data belonging to the same bin together. 
-    Therefore, the client can retrieve Z data items at a time and insert each item to cuckoo hash table. 
-    For the local implementation of the cuckoo hash eviction operation, we insert elements one by one. 
-    This approach simplifies the implementation because there is no need to initialize multiple cuckoo hash tables. 
-    However, note that our implementation still guarantees the properties described in the paper, since during each insertion, 
-    the result of our hash computation is guaranteed to fall within a specific bin (see function get_p1_p2(uint64_t id_and_counter, Client* client)). 
-    Thus, we ensure that every element completes its eviction process within its assigned bin.*/
-    // // 模拟不经意排序的时间开销：每 512 个数据等待 2ms
-    // size_t batch_size = 512;
-    // size_t num_batches = (buffer_curr.size() + batch_size - 1) / batch_size;  // 向上取整
-    // uint64_t total_wait_ms = num_batches * 2;  // 每批等待 2ms
-
-    // 高精度等待 total_wait_ms 毫秒
-    // auto start = std::chrono::steady_clock::now();
-    // auto wait_duration = std::chrono::milliseconds(total_wait_ms);
-    // while(std::chrono::steady_clock::now() - start < wait_duration) {
-    //     // 防止编译器优化掉的空循环
-    //     asm volatile("" ::: "memory");
-    // }
 
     for(Branch* branch : buffer_curr) {
         if(branch != nullptr && !branch->is_dummy_for_shuffle) {
             insert(branch, client);
         }
     }
-    client->communication_round_trip_ += buffer_curr.size() / Z;
-    client->communication_volume_ += buffer_curr.size() * B; 
     
     // 8. 资源清理
     // dummy_arena 会在函数结束时自动析构，无需手动 delete
@@ -445,8 +355,8 @@ void CuckooTable::oblivious_shuffle_and_insert_last_level(std::vector<Branch*>& 
     int total_nodes_per_level = B * Z;
 
     // 2. 并行解密 (保持原有的计算密集型优化)
-    // omp_set_num_threads(num_threads);
-    // #pragma omp parallel for schedule(static)
+    omp_set_num_threads(num_threads);
+    #pragma omp parallel for schedule(static)
     for(int i = 0; i < (int)all_elements.size(); i++) {
         all_elements[i]->trueData = client->cryptor_->aes_decrypt(all_elements[i]->trueData, branchs_level_belong_to[i]);
     }
@@ -457,7 +367,7 @@ void CuckooTable::oblivious_shuffle_and_insert_last_level(std::vector<Branch*>& 
     std::vector<Branch*> buffer_next(total_nodes_per_level);
 
     // 使用 parallel for 初始化以触发 NUMA 的 First-Touch 策略
-    // #pragma omp parallel for schedule(static)
+    #pragma omp parallel for schedule(static)
     for(int i = 0; i < total_nodes_per_level; ++i) {
         buffer_curr[i] = nullptr;
         buffer_next[i] = nullptr;
@@ -496,7 +406,7 @@ void CuckooTable::oblivious_shuffle_and_insert_last_level(std::vector<Branch*>& 
         const int p2i = 1 << i;
         const int mask = p2i - 1; // 用于位运算替代取模
 
-        // #pragma omp parallel for schedule(static)
+        #pragma omp parallel for schedule(static)
         for (int j = 0; j < B / 2; ++j) {
             // 【优化】位运算计算索引
             int b1 = (j & mask) + ((j >> i) << (i + 1));
@@ -536,21 +446,13 @@ void CuckooTable::oblivious_shuffle_and_insert_last_level(std::vector<Branch*>& 
 
     // 6. 最终插入与去重阶段
     // 此时结果存储在 buffer_curr 中
-    table.assign(get_aligned_size(pow(2, HOTREE_level_)), Entry());
+    table.assign(pow(2, HOTREE_level_), Entry());
     stash.clear();
     current_count = 0;
     client->UpdateSeed(HOTREE_level_);
 
     int curr_id = 2147483647; // Sentinel value
 
-
-    /*The oblivious shuffle has already clustered all data belonging to the same bin together. 
-    Therefore, the client can retrieve Z data items at a time and insert each item to cuckoo hash table. 
-    For the local implementation of the cuckoo hash eviction operation, we insert elements one by one. 
-    This approach simplifies the implementation because there is no need to initialize multiple cuckoo hash tables. 
-    However, note that our implementation still guarantees the properties described in the paper, since during each insertion, 
-    the result of our hash computation is guaranteed to fall within a specific bin (see function get_p1_p2(uint64_t id_and_counter, Client* client)). 
-    Thus, we ensure that every element completes its eviction process within its assigned bin.*/
     for(Branch* branch : buffer_curr) {
         if(branch != nullptr && !branch->is_dummy_for_shuffle) {
             // 【保留】原有的去重逻辑
@@ -566,12 +468,309 @@ void CuckooTable::oblivious_shuffle_and_insert_last_level(std::vector<Branch*>& 
                 
                 insert(branch, client);
                 curr_id = branch->id;
-            }
+            }                
         }
     }
-    client->communication_round_trip_ += buffer_curr.size() / Z;
-    client->communication_volume_ += buffer_curr.size() * B; 
+
+    // 资源自动清理：
+    // dummy_arena 和 buffer vectors 会在此处析构
+    // 无需手动 delete 循环
 }
+
+// void CuckooTable::oblivious_shuffle_and_insert(std::vector<Branch*>& all_elements_before_otc, std::vector<int> branchs_level_belong_to, Client* client) {
+//     // 1. 初始化基础状态
+//     table.assign(pow(2, HOTREE_level_), Entry());
+//     stash.clear();
+//     current_count = 0;
+//     client->UpdateSeed(HOTREE_level_);
+//     std::vector<Branch*> all_elements;
+
+//      // 处理特殊层级逻辑（保持原逻辑不变）
+//     if(all_elements_before_otc.size() <= TEE_Z ) {
+//         if(HOTREE_level_ != client->max_level_) {
+//             client->communication_round_trip_ += all_elements_before_otc.size()/Z;
+//             client->communication_volume_ += all_elements_before_otc.size()*BlockSize;
+//             for(auto &elem : all_elements_before_otc) {
+//                 insert(elem, client);
+//             }
+//             return ;
+//         } else {
+//             client->communication_round_trip_ += 2*all_elements_before_otc.size()/Z;
+//             client->communication_volume_ += 2*all_elements_before_otc.size()*BlockSize;
+//             all_elements = oblivious_tight_compaction(all_elements_before_otc, branchs_level_belong_to, client);
+//             for(auto &elem : all_elements) insert(elem, client);
+//             return ;
+//         }
+//     }
+//     else {
+//         //为了准确的测试性能，每层的shuffle我们仅仅进行一次，并记录耗时和通信量，后续调用shuffle明文调用，但开销增加到最后的结果中
+//         if(shuffle_count > 0) { 
+//             shuffle_count ++;
+//             client->communication_round_trip_ += single_shuffle_round_trips;
+//             client->communication_volume_ += single_shuffle_commucations;
+//             if(HOTREE_level_ != client->max_level_) {
+//                 for(auto &elem : all_elements_before_otc) {
+//                     insert(elem, client);
+//                 }
+//                 return ;
+//             } else {
+//                 all_elements = oblivious_tight_compaction(all_elements_before_otc, branchs_level_belong_to, client);
+//                 for(auto &elem : all_elements) insert(elem, client);
+//                 return ;
+//             }
+//         }
+//         else {
+//             shuffle_count ++;
+//             goto full_oblivious_shuffle;
+//         }
+//     }
+    
+// full_oblivious_shuffle:
+//     single_shuffle_commucations = client->communication_volume_;
+//     single_shuffle_round_trips = client->communication_round_trip_;
+//     auto start_t = std::chrono::high_resolution_clock::now();
+
+//     if(all_elements_before_otc.size() > TEE_Z ) {
+//         if(HOTREE_level_ != client->max_level_) {
+//             all_elements = std::move(all_elements_before_otc);
+//         } else {
+//             oblivious_shuffle_and_insert_last_level(all_elements_before_otc, branchs_level_belong_to, client);
+//             auto end_t = std::chrono::high_resolution_clock::now();
+//             single_shuffle_times = std::chrono::duration_cast<std::chrono::microseconds>(end_t - start_t).count() / 1000.0;
+//             single_shuffle_commucations = client->communication_volume_ - single_shuffle_commucations;
+//             single_shuffle_round_trips = client->communication_round_trip_ - single_shuffle_round_trips;
+//             return;
+//         }
+//     }
+
+//     // 2. 计算 Shuffle 网络参数
+//     int N_real = all_elements.size();
+//     int B;
+//     if(N_real > Z) B = pow(2, ceil(log2(2.0 * N_real / Z)));
+//     else B = pow(2, ceil(log2(2.0 * sqrt(N_real))));
+//     int num_levels_shuffle = ceil(log2(B));
+
+//     // 3. 并行解密 (计算密集型任务，OpenMP 收益最高) [cite: 702]
+//     omp_set_num_threads(num_threads);
+//     #pragma omp parallel for schedule(static)
+//     for(int i = 0; i < (int)all_elements.size(); i++) {
+//         all_elements[i]->trueData = client->cryptor_->aes_decrypt(all_elements[i]->trueData, branchs_level_belong_to[i]);
+//     }
+
+//     // 4. 【关键优化】平面化内存布局与 Dummy 块对象池
+//     // 使用一维 vector 模拟三维内存 [i][b][k]，极大提升 Cache 命中率
+//     int total_nodes_per_level = B * Z;
+//     int total_memory_size = (num_levels_shuffle + 1) * total_nodes_per_level;
+//     std::vector<Branch*> flat_memory(total_memory_size, nullptr);
+    
+//     // 预分配所有需要的 Dummy 块，避免在并行循环中调用 new
+//     int num_dummies = total_memory_size - all_elements.size();
+//     std::vector<Branch*> dummy_pool;
+//     dummy_pool.reserve(num_dummies);
+//     for(int i = 0; i < num_dummies; ++i) {
+//         dummy_pool.push_back(new Branch(true, true)); // [cite: 82, 395]
+//     }
+
+//     // 初始化第一层 (Level 0)
+//     int data_idx = 0;
+//     int dummy_idx = 0;
+//     for(int b = 0; b < B; ++b) {
+//         for(int k = 0; k < Z; ++k) {
+//             int offset = b * Z + k;
+//             if(k < Z / 2 && data_idx < (int)all_elements.size()) {
+//                 flat_memory[offset] = all_elements[data_idx++];
+//             } else {
+//                 flat_memory[offset] = dummy_pool[dummy_idx++];
+//             }
+//         }
+//     }
+//     // 填充后续层级的占位符（使用池中剩余的 dummy）
+//     for(int i = 1; i <= num_levels_shuffle; ++i) {
+//         for(int j = 0; j < total_nodes_per_level; ++j) {
+//             flat_memory[i * total_nodes_per_level + j] = dummy_pool[dummy_idx++];
+//         }
+//     }
+
+//     // 5. 【关键优化】并行 Butterfly Network [cite: 72]
+//     // 减少线程间共享变量，将统计移出并行区
+//     for (int i = 0; i < num_levels_shuffle; ++i) {
+//         int current_level_offset = i * total_nodes_per_level;
+//         int next_level_offset = (i + 1) * total_nodes_per_level;
+
+//         #pragma omp parallel for schedule(static)
+//         for (int j = 0; j < B / 2; ++j) {
+//             int p2i = 1 << i;
+//             int p2i_plus_1 = 1 << (i + 1);
+            
+//             int b1 = (j % p2i) + (j / p2i) * p2i_plus_1;
+//             int b2 = b1 + p2i;
+
+//             // 获取当前层和下一层容器的引用（模拟之前的 memory[i][b]）
+//             // 注意：这里需要根据你的 ObliviousMergeSplit 签名调整，
+//             // 建议传入指针或 span，避免 vector 拷贝
+//             std::vector<Branch*> bin_i_b1, bin_i_b2, bin_next_2j, bin_next_2j1;
+            
+//             // 模拟 Bucket 提取 (在此处手动处理 Z 个元素的拷贝/移动)
+//             auto get_bucket = [&](int level_offset, int b_idx) {
+//                 std::vector<Branch*> res;
+//                 res.reserve(Z);
+//                 for(int k=0; k<Z; ++k) res.push_back(flat_memory[level_offset + b_idx * Z + k]);
+//                 return res;
+//             };
+
+//             auto bucket_i_b1 = get_bucket(current_level_offset, b1);
+//             auto bucket_i_b2 = get_bucket(current_level_offset, b2);
+//             std::vector<Branch*> out_1, out_2; // 预留输出空间
+//             out_1.reserve(Z); out_2.reserve(Z);
+
+//             if(i == 0) {
+//                 client->ObliviousMergeSplit_firstlevel(bucket_i_b1, bucket_i_b2, out_1, out_2, i, num_levels_shuffle, HOTREE_level_);
+//             } else {
+//                 client->ObliviousMergeSplit(bucket_i_b1, bucket_i_b2, out_1, out_2, i, num_levels_shuffle, HOTREE_level_);
+//             }
+
+//             // 写回平面化内存
+//             for(int k=0; k<Z; ++k) {
+//                 flat_memory[next_level_offset + (2*j) * Z + k] = out_1[k];
+//                 flat_memory[next_level_offset + (2*j+1) * Z + k] = out_2[k];
+//             }
+//         }
+//         // 更新统计数据
+//         client->communication_round_trip_ += (B / 2) / num_threads;
+//         client->communication_volume_ += (B / 2) * 2 * Z * BlockSize * 2; 
+//     }
+
+//     // 6. 最终插入阶段
+//     // 重新初始化表格以准备插入混淆后的元素 [cite: 353]
+//     table.assign(pow(2, HOTREE_level_), Entry());
+//     stash.clear();
+//     current_count = 0;
+//     client->UpdateSeed(HOTREE_level_);
+
+//     int last_level_offset = num_levels_shuffle * total_nodes_per_level;
+//     for(int i = 0; i < total_nodes_per_level; i++) {
+//         Branch* branch = flat_memory[last_level_offset + i];
+//         if(branch != nullptr && !branch->is_dummy_for_shuffle) {
+//             insert(branch, client); // [cite: 358, 472]
+//         }
+//     }
+    
+//     // 7. 清理资源
+//     for (auto* b : dummy_pool) delete b;
+//     auto end_t = std::chrono::high_resolution_clock::now();
+//     single_shuffle_times = std::chrono::duration_cast<std::chrono::microseconds>(end_t - start_t).count() / 1000.0;
+//     single_shuffle_commucations = client->communication_volume_ - single_shuffle_commucations;
+//     single_shuffle_round_trips = client->communication_round_trip_ - single_shuffle_round_trips;
+// }
+
+
+// void CuckooTable::oblivious_shuffle_and_insert_last_level(std::vector<Branch*>& all_elements, std::vector<int> branchs_level_belong_to, Client* client) {
+//     int N_real = all_elements.size();
+//     int B;
+//     if(N_real > Z) B = pow(2, ceil(log2(2.0 * N_real / Z)));
+//     else B = pow(2, ceil(log2(2.0 * sqrt(N_real))));
+//     int num_levels_shuffle = ceil(log2(B));
+
+//     /* This decryption step can be securely implemented by recording the layer 
+//     where the input data itself is located (which the server can already know), 
+//     and then decrypting the data within the ObliviousMergeSplit function based 
+//     on the layer where the original data is located. All decrypted data is encrypted 
+//     using the key corresponding to the new layer, but for the sake of concise and easy to 
+//     understand code, we will decrypt it here. Note that this does not affect performance. */
+//     omp_set_num_threads(num_threads);
+//     #pragma omp parallel for
+//     for(int i = 0; i < all_elements.size(); i++) {
+//         all_elements[i]->trueData = client->cryptor_->aes_decrypt(all_elements[i]->trueData, branchs_level_belong_to[i]);
+//     }
+//     std::vector<std::vector<std::vector<Branch*>>> memory(num_levels_shuffle + 1);
+//     // ✅【修复步骤 1】定义一个局部向量，作为“垃圾回收站”
+//     std::vector<Branch*> dummy_garbage_collector;
+//     dummy_garbage_collector.reserve(B * Z * (num_levels_shuffle + 1));
+    
+//     int data_idx = 0;
+//     for(int i = 0; i < num_levels_shuffle + 1; ++i) {
+//         memory[i].resize(B);
+//         for(int b = 0; b < B; ++b) {
+//             memory[i][b].reserve(Z);
+//             for(int k = 0; k < Z; ++k) {
+//                 if(i == 0 && k < Z / 2 && data_idx < all_elements.size()) {
+//                     memory[i][b].push_back(all_elements[data_idx++]);
+//                 } else {
+//                     Branch* dummy_branch = new Branch(true, true);
+//                     memory[i][b].push_back(dummy_branch); // 仅存储指针
+//                     // 将其加入垃圾回收站，以便稍后释放
+//                     dummy_garbage_collector.push_back(dummy_branch);
+//                 }
+//             }
+//         }
+//     }
+
+//     // Butterfly network
+//     omp_set_num_threads(num_threads);
+//     for (int i = 0; i < num_levels_shuffle; ++i) {
+//         #pragma omp parallel for
+//         for (int j = 0; j < B / 2; ++j) {
+//             int power_of_2_i = 1 << i;
+//             int power_of_2_i_plus_1 = 1 << (i + 1);
+            
+//             int source_idx_1 = (j % power_of_2_i) + (j / power_of_2_i) * power_of_2_i_plus_1;
+//             int source_idx_2 = source_idx_1 + power_of_2_i;
+
+//             if(i == 0) {
+//                 client->ObliviousMergeSplit_firstlevel_last_level(
+//                     memory[i][source_idx_1],
+//                     memory[i][source_idx_2],
+//                     memory[i+1][2 * j],
+//                     memory[i+1][2 * j + 1],
+//                     i,
+//                     num_levels_shuffle,
+//                     HOTREE_level_
+//                 );
+//             }
+//             else {
+//                 client->ObliviousMergeSplit_firstlevel_last_level(
+//                     memory[i][source_idx_1],
+//                     memory[i][source_idx_2],
+//                     memory[i+1][2 * j],
+//                     memory[i+1][2 * j + 1],
+//                     i,
+//                     num_levels_shuffle,
+//                     HOTREE_level_
+//                 );
+//             }
+//         }
+//         client->communication_round_trip_ += (B / 2) / num_threads;
+//         // this level have B/2 bin, every bin have 2Z block, every block have size Blocksize, one trip (retrieve from server, send to server)
+//         client->communication_volume_ += (B / 2) * 2 * Z * BlockSize * 2; 
+//     }
+
+//     // clear table and reinsert
+//     for (auto* b : dummy_garbage_collector) {
+//         delete b;
+//     }
+//     table.assign(pow(2,HOTREE_level_), Entry());
+//     stash.clear();
+//     current_count = 0;
+//     client->UpdateSeed(HOTREE_level_);
+
+//     int curr_id = 2147483647;
+//     for(int i = 0; i < B; i++) {
+//         for(auto* branch : memory[num_levels_shuffle][i]) {
+//             if(branch != nullptr && !branch->is_dummy_for_shuffle) {
+//                 if(curr_id != branch->id) {
+//                     branch->level = HOTREE_level_;
+//                     branch->counter_for_lastest_data = 0;
+//                     for(auto & triple : branch->child_triple) {
+//                         triple->counter_for_lastest_data = 0;
+//                         triple->level = HOTREE_level_;
+//                     }
+//                     insert(branch, client);
+//                     curr_id = branch->id;
+//                 }                
+//             }
+//         }
+//     }
+// }
 
 // ---------------------------------------------------------
 // New Function: Oblivious Shuffle
@@ -620,7 +819,7 @@ void CuckooTable::oblivious_shuffle(Client* client) {
     // Butterfly 网络层级交换
     omp_set_num_threads(num_threads);
     for (int i = 0; i < num_levels_shuffle; ++i) {
-        // #pragma omp parallel for
+        #pragma omp parallel for
         for (int j = 0; j < B / 2; ++j) {
             int power_of_2_i = 1 << i;
             int power_of_2_i_plus_1 = 1 << (i + 1);
